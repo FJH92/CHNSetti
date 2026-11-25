@@ -1,0 +1,14 @@
+# Changelog
+
+## v1.0.0
+
+* First public release of CHNSetti.
+* Seven-step desktop wizard: files, identification, calculation rules, calibration, chromatograms, results, and generate.
+* Reads Thermo Scientific Flash 2000 (Eager 300) run folders natively (.MTH method and sample table with the .DAT detector records; .SUM optional), as well as Excel/CSV exports and history ZIP archives.
+* Visual review of every chromatogram, with editable integration intervals and baselines on the unsmoothed detector signals.
+* Calibration review against check materials and their certificates, with averaged K, origin least-squares, and fitted-intercept models.
+* Original instrument files and saved results are never modified; every processing decision, exclusion, and reason is recorded.
+* Command-line interface (`analyze`, `list-archive`) that runs without PySide6.
+* Exports review and report workbooks, a detailed calculations workbook, a Word report, and a project file.
+* Built-in synthetic demonstration data.
+* `--make-exe` creates a standalone Windows executable from the single source file.
