@@ -765,7 +765,7 @@ REPLICATE_SUFFIX=re.compile(r'^(.*?)\s*(?:\s-\s*|\s*_\s*|\s+)(\d{1,2})\s*$',re.U
 
 
 def sample_group_name(name):
-    """Accept delimited replicate suffixes, including Sample 1-1; keep N1/CaCO3."""
+    """Accept delimited replicate suffixes such as 'Sample 1-1' or 'Demo A - 2'; a name such as 'N1' stays whole."""
     value = tidy(name)
     matched = re.fullmatch(r'(.*?)(?:\s*[-_]\s*|\s+)(\d{1,2})', value)
     if matched and matched[1].strip() and 1 <= int(matched[2]) <= 20:
@@ -1148,7 +1148,7 @@ def compute_results(project: Project, reporting=False) -> list[GroupResult]:
     if st.high_rsd_enabled and (not math.isfinite(st.high_rsd_pct) or st.high_rsd_pct <= 0):
         raise ValueError('High-RSD threshold must be a positive percentage.')
     reference, outputs = reference_values(project, st.reference_table), []
-    value_for_statistics = report_value if reporting else accepted_value
+    value_for_statistics = report_value if reporting else _accepted_unless_failed
     count_label = 'reported' if reporting else 'accepted' 
     for (role, group_key), rows in group_records(project):
         label = tidy(rows[0].group or rows[0].name)
@@ -1424,8 +1424,7 @@ def _report_rows(project,groups,include_checks=False):
 def write_archive_style_report(project:Project,groups:list[GroupResult],path):
     """Write the clean laboratory report in the archived CHNS Excel layout.
 
-    Styled after original Results/*.XLS workbooks, especially
-    '2026.09.21 - CHNS results - Luis Gallego.XLS'. The first worksheet
+    Styled after the laboratory's earlier result workbooks (Results/*.XLS). The first worksheet
     retains the archived typography and grid, without an n row or red banner.
     This reproduces the lab's worksheet cosmetics, not the binary XLS format.
     Source verification/QC information remains in the separate 'Run information'
@@ -2120,8 +2119,8 @@ def _report_open_points(project):
         elif message.startswith('Confirm sample roles and groups'):
             count = message.count(',') + 1
             lines.append(f'Confirm the sample roles and groups of {count} measurement' + ('' if count == 1 else 's') + ' (step 2, Identification).')
-        elif message.startswith('Record source verification'):
-            lines.append('Record the source verification with reviewer and note (step 7, Generate).')
+        elif message.startswith(('Record source verification', 'Sign off the results')):
+            lines.append('Sign off the results as final (step 7, Generate).')
         else:
             lines.append(message)
     for element in ELEMENTS:
@@ -2237,6 +2236,9 @@ def _write_report_docx(project: Project, path):
                 '<w:right w:val="single" w:sz="4" w:color="FED7AA"/></w:tblBorders></w:tblPr><w:tblGrid><w:gridCol w:w="9866"/></w:tblGrid>'
                 f'<w:tr><w:tc><w:tcPr><w:shd w:val="clear" w:fill="{fill}"/></w:tcPr><w:p><w:pPr><w:spacing w:before="80" w:after="80"/></w:pPr>'
                 + ''.join(status) + '</w:p></w:tc></w:tr></w:tbl>')
+    if getattr(project, 'demo', False):
+        para(run(DEMO_WARNING if 'invented' in ' '.join(project.input_warnings) else
+                 'SIMULATED DATA — this example contains no laboratory measurements.', bold=True, colour='9A3412'), after=60)
     para('', after=60)
 
     # ------------------------------------------------------------------ 1. summary
@@ -2315,6 +2317,10 @@ def _write_report_docx(project: Project, path):
         para(run('b', sup=True, colour='9A3412'), run(' outside the range of the standards: the amount of the element in this portion is below '
              'the lowest (or above the highest) standard, so the result is extrapolated from the calibration.'), style='Note')
     held = sorted({report_value_text(records[i], e) for g in samples for i in g.indices for e in ELEMENTS if report_value(records[i], e) is None})
+    if 'Failed' in held:
+        para(run('Failed: left out of the mean — the portion did not burn, or the element is missing in this portion '
+                 'while the other portions of the sample contain it (section 6).'), style='Note')
+    held = [h for h in held if h != 'Failed']
     if held:
         para(run(' / '.join(held) + ': not reported, waiting for a decision (section 6).'), style='Note')
     if checks:
@@ -2887,6 +2893,245 @@ def export_analysis(project: Project, parent_folder, *, extra_files=False, draft
     return {'Folder': str(folder), **{title: str(folder / name) for title, name in names.items()}}
 
 
+# ----------------------------- full synthetic demonstration ---------------------
+# Synthetic native files (one .MTH, 15 .DAT) written by CHNSetti itself, so that every step of the wizard can be
+# tried without laboratory data. All signals, names, masses and compositions are invented. The byte layout covers
+# only the fields CHNSetti reads: these files are NOT instrument files and must never be opened in Eager 300.
+# Planted problems: a standard reading 45 % high in nitrogen, a hydrogen tail cut off in the saved integration,
+# a clear sulfur peak missing from the saved integration, a portion without sulfur, a failed portion and a sample
+# without sulfur. The file-repair variant swaps the contents of two data files.
+DEMO_RUN_NAME = 'SYNTHETIC CHNS demonstration'
+DEMO_REFERENCE_NAME = 'BBOT theoretical composition (synthetic demonstration)'
+DEMO_REFERENCE = {'BBOT': {'N': 6.51, 'C': 72.53, 'H': 6.09, 'S': 7.45}}   # C26H26N2O2S, from the formula
+DEMO_WARNING = ('SYNTHETIC DEMONSTRATION — invented detector signals, names, masses and compositions; '
+                'no laboratory measurements. The check material is compared with the theoretical composition of BBOT.')
+_DEMO_LABELS = ('Nitrogen', 'Carbon', 'Hydrogen', 'Sulphur')
+_DEMO_CENTERS = (220, 520, 820, 1160)
+_DEMO_LENGTH = 1450
+_DEMO_K = 3_000_000.0
+_DEMO_DRIFT = 200.0
+_DEMO_STANDARDS = [(4., 35., 3., 2.), (8., 50., 5., 8.), (12., 70., 8., 15.)]
+_DEMO_SPECS = [
+    ('Bypass 1', 0, 0.0, (0., 0., 0., 0.)),
+    ('Demo Std A', 1, 1.0, _DEMO_STANDARDS[0]),
+    ('Demo Std B', 101, 1.5, _DEMO_STANDARDS[1]),
+    ('Demo Std C', 201, 2.4, _DEMO_STANDARDS[2]),
+    ('BBOT', 2, 1.4, tuple(DEMO_REFERENCE['BBOT'][e] for e in ELEMENTS)),
+    ('Demo A - 1', 2, 1.45, (6.0, 50.0, 5.0, 4.0)),
+    ('Demo A - 2', 2, 1.55, (6.1, 50.4, 5.1, 4.1)),
+    ('Demo A - 3', 2, 1.50, (5.9, 49.6, 4.9, 4.0)),
+    ('Bypass 2', 0, 0.0, (0., 0., 0., 0.)),
+    ('Demo B - 1', 2, 1.6, (7.0, 55.0, 4.0, 3.0)),
+    ('Demo B - 2', 2, 1.5, (7.1, 54.8, 4.1, 3.1)),
+    ('Demo B - 3', 2, 1.55, (7.0, 55.0, 4.0, 3.0)),
+    ('Demo C - 1', 2, 1.6, (5.0, 45.0, 4.0, 0.0)),
+    ('Demo C - 2', 2, 1.5, (5.1, 45.2, 4.1, 0.0)),
+    ('Demo C - 3', 2, 1.55, (4.9, 44.8, 3.9, 0.0)),
+]
+DEMO_PROBLEMS = {
+    'Demo Std B / N': 'detector response 45 % too high (a faulty standard)',
+    'Demo A - 1 / H': 'saved integration ends too early, cutting off the hydrogen tail',
+    'Demo A - 2 / S': 'clear sulfur peak missing from the saved integration',
+    'Demo A - 3 / S': 'no sulfur signal, although the other portions contain sulfur',
+    'Demo B - 3 / all': 'signal 3.5 % of normal (portion that did not burn)',
+    'Demo C / S': 'no sulfur in any portion (reported as 0)',
+    'file repair': 'contents of SYN006.DAT and SYN007.DAT swapped',
+}
+
+
+def _demo_f32(value):
+    return struct.unpack('<f', struct.pack('<f', value))[0]
+
+
+def _demo_text(buf, offset, width, value):
+    data = value.encode('ascii')
+    if len(data) > width:
+        raise ValueError(value)
+    buf[offset:offset + width] = data.ljust(width, b'\0')
+
+
+def _demo_simulate(index, spec):
+    import random
+    name, kind, mass, truth = spec
+    rng = random.Random(38000 + index)
+    baseline = 1000
+    level = [baseline + _DEMO_DRIFT * (1 - i / _DEMO_LENGTH) for i in range(_DEMO_LENGTH)]
+    signal = [round(level[i]) + rng.randrange(-6, 7) for i in range(_DEMO_LENGTH)]
+    peaks = []
+    for element, center, target in zip(ELEMENTS, _DEMO_CENTERS, truth):
+        response = 1.45 if name == 'Demo Std B' and element == 'N' else 1.0
+        if name == 'Demo B - 3':
+            response *= .035
+        if name == 'Demo A - 3' and element == 'S':
+            response = 0.0
+        area = mass * target / 100 * _DEMO_K * response
+        if area <= 0:
+            continue
+        shape = []
+        for i in range(_DEMO_LENGTH):
+            d = i - center
+            if element == 'H':
+                value = math.exp(-.5 * (d / 13) ** 2) if d < 0 else math.exp(-d / 23)
+            else:
+                width = {'N': 12., 'C': 17., 'S': 13.}[element]
+                value = math.exp(-.5 * (d / width) ** 2)
+            shape.append(value if abs(d) <= (235 if element == 'H' else 105) else 0.)
+        scale = area / sum(shape)
+        for i, value in enumerate(shape):
+            signal[i] += round(scale * value)
+        if name == 'Demo A - 2' and element == 'S':
+            continue
+        start = center - (55 if element == 'H' else 65)
+        end = center + (190 if element == 'H' else 65)
+        if name == 'Demo A - 1' and element == 'H':
+            end = center + 33
+        # saved area as the instrument stores it: signal sum minus the mean of the two baseline levels
+        left, right = _demo_f32(level[start]), _demo_f32(level[end])
+        saved = _demo_f32(sum(signal[start + 1:end + 1]) - (left + right) * (end - start) / 2)
+        peaks.append({'element': element, 'start': start, 'end': end, 'left': left, 'right': right, 'area': saved})
+    return {'index': index, 'name': name, 'kind': kind, 'mass': _demo_f32(mass), 'truth': dict(zip(ELEMENTS, truth)),
+            'file': f'SYN{index:03d}.DAT', 'signal': signal, 'peaks': peaks}
+
+
+def _demo_dat(row, coefficients):
+    signal, peaks = row['signal'], row['peaks']
+    count, npeak = len(signal), len(peaks)
+    base = 136 + 4 * count
+    text = base + 44 * npeak + 12
+    buf = bytearray(text + 64)
+    for offset, value in ((0, 0), (4, 1), (8, 0), (12, count), (16, npeak), (20, 35),
+                          (24, count + 36), (32, max(0, max(signal))), (44, 2), (108, 1)):
+        struct.pack_into('<I', buf, offset, value)
+    minutes = 8 * 60 + row['index'] * 12
+    _demo_text(buf, 48, 16, f'01-01-00{minutes // 60:02d}:{minutes % 60:02d}.00')
+    _demo_text(buf, 64, 16, row['name'])
+    struct.pack_into('<f', buf, 116, row['mass'])
+    struct.pack_into('<' + str(count) + 'i', buf, 136, *signal)
+    for i, p in enumerate(peaks):
+        offset = base + 44 * i
+        j = ELEMENTS.index(p['element'])
+        pct = 100 * p['area'] / (row['mass'] * coefficients[j])
+        struct.pack_into('<I', buf, offset + 4, 0)
+        struct.pack_into('<I', buf, offset + 8, p['start'])
+        struct.pack_into('<7f', buf, offset + 12, 0., 0., 0., p['left'], p['right'], p['area'], pct)
+        struct.pack_into('<HH', buf, offset + 40, j + 1, 0)
+        struct.pack_into('<I', buf, offset + 44, p['end'])
+    for j, label in enumerate(_DEMO_LABELS):
+        _demo_text(buf, text + 16 * j, 16, label)
+    return buf
+
+
+def _demo_mth(rows, coefficients):
+    buf = bytearray(384004)
+    for j, label in enumerate(_DEMO_LABELS):
+        _demo_text(buf, 12 + 28 * j, 16, label)
+        struct.pack_into('<ii', buf, 28 * j, _DEMO_CENTERS[j] // 2, 25)
+    _demo_text(buf, 7296, 16, 'CHNS')
+    struct.pack_into('<4f', buf, 17996, *coefficients)
+    for row in rows:
+        if row['kind'] % 100 != 1:
+            continue
+        j = row['kind'] // 100
+        _demo_text(buf, 84592 + 16 * j, 16, row['name'])
+        struct.pack_into('<4f', buf, 22796 + 1024 * j, *_DEMO_STANDARDS[j])
+        areas = {p['element']: p['area'] for p in row['peaks']}
+        struct.pack_into('<4f', buf, 43276 + 1024 * j, *[areas[e] for e in ELEMENTS])
+    method = b'SYNTHETIC.eam'
+    struct.pack_into('<H', buf, 88442, len(method))
+    buf[96000:96000 + len(method)] = method
+    cursor = len(method) + 1
+    for index in range(1, 201):
+        if index <= len(rows):
+            row = rows[index - 1]
+            filename, name = row['file'].encode('ascii'), row['name'].encode('ascii')
+            struct.pack_into('<H', buf, 87636 + 2 * index, cursor)
+            struct.pack_into('<H', buf, 89244 + 2 * index, len(filename))
+            start = 96000 + cursor - 1; buf[start:start + len(filename)] = filename; cursor += len(filename)
+            struct.pack_into('<H', buf, 88038 + 2 * index, cursor)
+            struct.pack_into('<H', buf, 89646 + 2 * index, len(name))
+            start = 96000 + cursor - 1; buf[start:start + len(name)] = name; cursor += len(name)
+            off = 7724 + index * 50
+            struct.pack_into('<H', buf, off, row['kind'])
+            struct.pack_into('<f', buf, off + 10, row['mass'])
+        else:
+            struct.pack_into('<H', buf, 87636 + 2 * index, cursor)
+            struct.pack_into('<H', buf, 88038 + 2 * index, cursor)
+    return buf
+
+
+def write_demo_files(folder):
+    """Write the synthetic run to FOLDER/SYNTHETIC_main and FOLDER/SYNTHETIC_file_repair (overwritten each time),
+    with a manifest of the planted problems. Returns the folder. Deterministic: the same bytes every time."""
+    folder = Path(folder)
+    rows = [_demo_simulate(i, spec) for i, spec in enumerate(_DEMO_SPECS, 1)]
+    standards = [r for r in rows if r['kind'] % 100 == 1]
+    coefficients = []
+    for e in ELEMENTS:
+        ratios = [next(p['area'] for p in r['peaks'] if p['element'] == e) / (r['mass'] * r['truth'][e] / 100) for r in standards]
+        coefficients.append(_demo_f32(sum(ratios) / len(ratios)))
+    data = {r['file']: _demo_dat(r, coefficients) for r in rows}
+    method = _demo_mth(rows, coefficients)
+    for sub in ('SYNTHETIC_main', 'SYNTHETIC_file_repair'):
+        target = folder / sub
+        target.mkdir(parents=True, exist_ok=True)
+        (target / 'SYNTHETIC_CHNS.MTH').write_bytes(method)
+        for filename, content in data.items():
+            if sub == 'SYNTHETIC_file_repair' and filename in ('SYN006.DAT', 'SYN007.DAT'):
+                content = data['SYN007.DAT' if filename == 'SYN006.DAT' else 'SYN006.DAT']
+            (target / filename).write_bytes(content)
+        (target / 'SYNTHETIC_ONLY.txt').write_text(
+            'SYNTHETIC DEMONSTRATION FILES WRITTEN BY CHNSetti. NOT INSTRUMENT MEASUREMENTS.\n'
+            'Do not open them in Eager 300 or on an analyzer.\n', encoding='utf-8')
+    manifest = {'synthetic': True, 'warning': DEMO_WARNING, 'reference_name': DEMO_REFERENCE_NAME,
+                'reference_values': DEMO_REFERENCE, 'measurement_count': len(rows), 'sample_groups': 3,
+                'sample_portions': 9, 'problems': DEMO_PROBLEMS,
+                'measurements': [{k: v for k, v in r.items() if k != 'signal'} for r in rows]}
+    (folder / 'synthetic_manifest.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
+    return folder
+
+
+def demo_folder():
+    """Where the program writes its demonstration files: a folder of its own, never next to real runs."""
+    return Path(tempfile.gettempdir()) / 'CHNSetti full demonstration'
+
+
+def full_demo_project(folder=None, repair=False):
+    """The synthetic run, opened through the ordinary native import. Nothing is pre-decided: roles, choice of
+    standards, peaks and sign-off go through the wizard as for a real run. The check material is compared with
+    the theoretical composition of BBOT, kept with this project only."""
+    folder = write_demo_files(folder or demo_folder())
+    sub = 'SYNTHETIC_file_repair' if repair else 'SYNTHETIC_main'
+    project = import_file(folder / sub / 'SYNTHETIC_CHNS.MTH',
+                          run_name=DEMO_RUN_NAME + (' (file repair)' if repair else ''))
+    if not project.demo:
+        mark_demo_project(project)
+    return project
+
+
+DEMO_NOTE_START = 'SYNTHETIC DEMONSTRATION FILES WRITTEN BY CHNSetti'
+
+
+def is_demo_run(path):
+    """True for a .MTH written by write_demo_files (its folder carries CHNSetti's SYNTHETIC_ONLY.txt note)."""
+    try:
+        path = Path(path)
+        note = path.parent / 'SYNTHETIC_ONLY.txt'
+        return path.suffix.lower() == '.mth' and note.is_file() and \
+            note.read_text(encoding='utf-8', errors='ignore').startswith(DEMO_NOTE_START)
+    except (OSError, TypeError, ValueError):
+        return False
+
+
+def mark_demo_project(project):
+    """Label a project as the synthetic demonstration and give its check material the theoretical BBOT values."""
+    project.demo = True
+    if DEMO_WARNING not in project.input_warnings:
+        project.input_warnings.insert(0, DEMO_WARNING)
+    name = save_project_certificate(project, DEMO_REFERENCE_NAME, DEMO_REFERENCE)
+    set_settings(project, reference_table=name, expected_replicates=3)
+    return project
+
+
 # ----------------------------- built-in demo ---------------------------------
 
 def demo_project():
@@ -2999,12 +3244,48 @@ def launch_gui():
         return None
 
     def reviewer_edit(parent):
+        # Since 1.0.0 nobody types a reviewer: the computer login is recorded. The field stays (hidden) for the code.
         field = QLineEdit()
         owner = session_owner(parent)
-        if owner is not None:
-            field.setText(owner.reviewer_name)
-            field.textChanged.connect(lambda text: setattr(owner, 'reviewer_name', text.strip()))
+        field.setText((owner.reviewer_name if owner is not None else '') or computer_login())
+        field.hide()
         return field
+
+    def quiet_label(text):
+        label = QLabel(text); label.hide(); return label
+
+    BUSY_DELAY_S = 2.0
+
+    def run_busy(parent, text, fn, *args, **kwargs):
+        """Runs fn (engine work only, no widgets) while the window keeps drawing. When it takes longer than
+        2 seconds a small box says what CHNSetti is doing, as when CHNSetti.exe is created."""
+        from concurrent.futures import ThreadPoolExecutor, wait as _wait
+        import time as _time
+        owner = session_owner(parent) or (parent.window() if parent is not None else None)
+        timers = [t for t in (getattr(owner, 'dirty_timer', None), getattr(owner, 'recovery_timer', None)) if t is not None and t.isActive()]
+        for timer in timers: timer.stop()
+        BUSY_PROGRESS.clear()
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(fn, *args, **kwargs)
+                _wait([future], timeout=BUSY_DELAY_S)
+                if not future.done():
+                    progress = QProgressDialog(text, '', 0, 0, parent)
+                    progress.setWindowTitle('CHNSetti — please wait'); progress.setCancelButton(None)
+                    progress.setMinimumDuration(0); progress.setWindowModality(Qt.WindowModal); progress.setMinimumWidth(460)
+                    def tick():
+                        if future.done(): progress.accept(); return
+                        done, total = BUSY_PROGRESS.get('done'), BUSY_PROGRESS.get('total')
+                        progress.setLabelText(text + (f'\n\nMeasurement {done + 1} of {total}' if total else ''))
+                    timer = QTimer(progress); timer.setInterval(100); timer.timeout.connect(tick); timer.start()
+                    if not future.done(): progress.exec()
+                    timer.stop(); progress.close()
+                return future.result()
+        finally:
+            QApplication.restoreOverrideCursor()
+            BUSY_PROGRESS.clear()
+            for timer in timers: timer.start()
 
     def readable_outcome(value):
         return {'held_source': 'Source requires review', 'out_of_range': 'Outside 0–100 %; review required',
@@ -3074,6 +3355,15 @@ def launch_gui():
 
     def num(value,dp):
         return '' if value is None else f'{value:.{dp}f}'
+
+    def screen_number(value,dp=4):
+        """A % value on screen: four decimals, and a plain 0 for zero (the files keep every digit)."""
+        if value is None:return ''
+        return '0' if value==0 else f'{value:.{dp}f}'
+
+    def screen_report_text(record,element):
+        value=report_value(record,element)
+        return screen_number(value) if value is not None else report_value_text(record,element)
 
     HELP_OVERVIEW = (
         '## How CHNSetti works\n'
@@ -3270,11 +3560,11 @@ def launch_gui():
             decision_row.addWidget(self.decision, 1)
             outer.addLayout(decision_row)
             identity_row = QHBoxLayout()
-            identity_row.addWidget(QLabel('Reviewer:'))
+            identity_row.addWidget(quiet_label('Reviewer:'))
             self.reviewer = reviewer_edit(self)
             self.reviewer.setPlaceholderText('Name or laboratory initials')
             identity_row.addWidget(self.reviewer)
-            identity_row.addWidget(QLabel('Reason:'))
+            identity_row.addWidget(QLabel('Note (optional):'))
             self.reason = QLineEdit()
             self.reason.setPlaceholderText('Evidence supporting this decision')
             identity_row.addWidget(self.reason, 2)
@@ -3360,9 +3650,6 @@ def launch_gui():
                 alert(self, 'No results selected', 'Select at least one element row.', True)
                 return
             reviewer, reason = self.reviewer.text().strip(), self.reason.text().strip()
-            if not reviewer or not reason:
-                alert(self, 'Review details needed', 'Enter the reviewer and a reason for this batch of decisions.', True)
-                return
             edits = [{'index': self.visible_rows[i][0], 'element': self.visible_rows[i][1],
                       'state': self.decision.currentData()} for i in rows]
             try:
@@ -3388,13 +3675,13 @@ def launch_gui():
                 row.addWidget(self.group, 1)
                 outer.addLayout(row)
             row = QHBoxLayout()
-            row.addWidget(QLabel('Reviewer:'))
+            row.addWidget(quiet_label('Reviewer:'))
             self.reviewer = reviewer_edit(self)
             self.reviewer.setPlaceholderText('Name or laboratory initials')
             row.addWidget(self.reviewer, 1)
             outer.addLayout(row)
             row = QHBoxLayout()
-            row.addWidget(QLabel('Reason:'))
+            row.addWidget(QLabel('Note (optional):'))
             self.reason = QLineEdit()
             self.reason.setPlaceholderText('Record the evidence or laboratory decision')
             row.addWidget(self.reason, 1)
@@ -3405,9 +3692,8 @@ def launch_gui():
             outer.addWidget(buttons)
 
         def finish(self):
-            if (not self.reviewer.text().strip() or not self.reason.text().strip()
-                    or self.group is not None and not self.group.text().strip()):
-                alert(self, 'Decision details needed', 'Enter a reviewer, reason and any requested group name.', True)
+            if self.group is not None and not self.group.text().strip():
+                alert(self, 'Group name needed', 'Enter the group name.', True)
                 return
             self.accept()
 
@@ -3436,10 +3722,10 @@ def launch_gui():
                         ', '.join(map(str, proposal['names'])), proposal.get('reason', '')), 1):
                     self.table.setItem(i, col, row_item(value))
             row = QHBoxLayout()
-            row.addWidget(QLabel('Reviewer:'))
+            row.addWidget(quiet_label('Reviewer:'))
             self.reviewer = reviewer_edit(self)
             row.addWidget(self.reviewer)
-            row.addWidget(QLabel('Reason:'))
+            row.addWidget(QLabel('Note (optional):'))
             self.reason = QLineEdit()
             self.reason.setPlaceholderText('How the common material identity was verified')
             row.addWidget(self.reason, 2)
@@ -3594,7 +3880,7 @@ def launch_gui():
                 'Finished reports and revised sources may already contain it.')
             outer.addWidget(self.confirm_source)
             row = QHBoxLayout()
-            row.addWidget(QLabel('Reviewer:'))
+            row.addWidget(quiet_label('Reviewer:'))
             self.reviewer = reviewer_edit(self)
             self.reviewer.setPlaceholderText('Name or laboratory initials')
             row.addWidget(self.reviewer)
@@ -3632,8 +3918,7 @@ def launch_gui():
             self.refresh_reference()
 
         def update_apply_state(self, *_):
-            self.apply_button.setEnabled(bool(self.preview) and self.confirm_source.isChecked()
-                and bool(self.reviewer.text().strip()) and bool(self.reason.text().strip()))
+            self.apply_button.setEnabled(bool(self.preview) and self.confirm_source.isChecked())
 
         def invalidate_preview(self, *_):
             self.preview = None
@@ -3844,7 +4129,7 @@ def launch_gui():
             outer.addWidget(caption('Do not approve values estimated from another portion or adjusted simply to '
                 'reduce replicate differences. Formula-derived values remain flagged separately.'))
             line = QHBoxLayout()
-            line.addWidget(QLabel('Reviewer:'))
+            line.addWidget(quiet_label('Reviewer:'))
             self.reviewer = reviewer_edit(self)
             self.reviewer.setPlaceholderText('Name or laboratory initials')
             line.addWidget(self.reviewer)
@@ -3935,10 +4220,9 @@ def launch_gui():
 
         def apply_batch(self):
             reviewer, reason = self.reviewer.text().strip(), self.reason.text().strip()
-            if not reviewer or not reason or not self.independent.isChecked():
+            if not self.independent.isChecked():
                 alert(self, 'Source review needed',
-                    'Enter the reviewer and reason, and confirm that the source represents independent measurements '
-                    'or approved instrument reprocessing.', True)
+                    'Confirm that the source represents independent measurements or approved instrument reprocessing.', True)
                 return
             mappings = {int(row['source_index']): self.table.cellWidget(i,3).currentData()
                         for i, row in enumerate(self.rows)}
@@ -4100,7 +4384,10 @@ def launch_gui():
                 self.source_actions.append(action)
             self.native_mode.currentIndexChanged.connect(self.source_mode_changed)
             menu.addSeparator()
-            menu.addAction('Load demonstration data',self.load_demo)
+            demos=menu.addMenu('Demonstration (synthetic data)')
+            demos.addAction('Full run with detector signals',self.load_full_demo)
+            demos.addAction('File repair: two data files swapped',lambda:self.load_full_demo(repair=True))
+            demos.addAction('Results table only (no detector signals)',self.load_demo)
             self.more.setMenu(menu)
             buttons.addWidget(self.more)
             buttons.addStretch(1)
@@ -4118,13 +4405,18 @@ def launch_gui():
             v.addWidget(self.counts)
             self.layout_.addWidget(frame)
             frame,v=card('Import notes')
-            self.warnings=QTextEdit()
+            self.warnings=QTextBrowser();self.warnings.setOpenLinks(False);self._show_names=set()
+            self.warnings.anchorClicked.connect(self.toggle_names)
             self.warnings.setReadOnly(True)
             self.warnings.setMinimumHeight(90);self.warnings.setMaximumHeight(160)
             v.addWidget(self.warnings)
             self.layout_.addWidget(frame)
             self.layout_.addStretch(1)
         def initializePage(self):self.refresh()
+        def toggle_names(self,url):
+            text=url.toString()
+            if text.startswith('names:'):
+                number=int(text.split(':')[1]);self._show_names^={number};self.refresh()
         def choose_source_mode(self,index):
             self.native_mode.setCurrentIndex(index)
             self.source_mode_changed(index)
@@ -4152,7 +4444,19 @@ def launch_gui():
                                 f"{summary['checks']} check group(s)"+('\nFolder: '+folder if folder and folder!='.' else ''))
             general=('Method-led import read','The native DAT reader uses','An element without a peak')
             specific=[str(w) for w in p.input_warnings if not str(w).startswith(general)]
-            self.warnings.setPlainText('\n\n'.join('• '+w for w in specific) if specific else 'No problems found while reading the files.')
+            if not specific:
+                self.warnings.setPlainText('No problems found while reading the files.')
+            else:
+                import html as _html
+                parts=[]
+                for number,note in enumerate(specific):
+                    sentence,names=plain_import_note(note)
+                    item='• '+_html.escape(sentence)
+                    if names:
+                        item+=(' <a href="names:%d">%s</a>'%(number,'hide which' if number in self._show_names else 'show which'))
+                        if number in self._show_names:item+='<br><span style="color:#64748B">'+_html.escape(names)+'</span>'
+                    parts.append(item)
+                self.warnings.setHtml('<br><br>'.join(parts))
             self.warnings.setToolTip('General notes about the file reader are kept in the exported reports and under Read instructions.')
         def import_selected_file(self,path):
             try:
@@ -4210,6 +4514,177 @@ def launch_gui():
             except Exception as exc:alert(self,'Project not opened',exc,True);return
             self.set_project(data['project'],pending=data['pending_edits'],path=path,saved_digest=data['digest'])
         def load_demo(self):self.set_project(demo_project())
+        def load_full_demo(self,repair=False):
+            try:p=full_demo_project(repair=repair)
+            except Exception as exc:alert(self,'Demonstration not opened',exc,True);return
+            self.set_project(p)
+
+    class DataFilesDialog(QDialog):
+        """Step 2: each measurement, the file it reads and what is inside that file. Click a data file to change it,
+        double-click a name or mass to correct it. Every change is saved at once and recorded (computer login, time,
+        what it was before); a note is optional."""
+        HEAD = ['#', 'Measurement', 'Mass (mg)', 'Data file', 'Inside the file', 'Mass in file (mg)', 'Measured', 'Status', 'Suggestion']
+        NAME, MASS, FILE = 1, 2, 3
+        def __init__(self, project, parent=None):
+            super().__init__(parent)
+            self.project = project; self.changed = False; self._loading = False
+            self.setWindowTitle('Data files of the measurements'); self.resize(1250, 640)
+            outer = QVBoxLayout(self)
+            folder = run_folder_of(project)
+            outer.addWidget(caption('Each row of the sequence and the data file it reads; "Inside the file" is read from the file itself. '
+                                    'Orange rows have no usable file. <b>Click a data file</b> to choose another one (the list shows what is '
+                                    'inside each file), or to mark the row as not measured. <b>Double-click a name or mass</b> to correct it. '
+                                    'Changes are saved at once and recorded with your computer login.'
+                                    + ('' if folder else ' The run folder is not available here: choose a file with "Choose a file…".')))
+            self.table = QTableWidget(); set_table(self.table, self.HEAD, (1, 4, 8))
+            self.table.setSelectionBehavior(QAbstractItemView.SelectItems)
+            self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+            self.table.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed)
+            self.table.cellClicked.connect(self.clicked)
+            self.table.cellChanged.connect(self.edited)
+            outer.addWidget(self.table, 1)
+            row = QHBoxLayout(); row.addWidget(QLabel('Note (optional):'))
+            self.note = QLineEdit(); self.note.setPlaceholderText('e.g. the instrument reused the file names; added to the record of the next changes')
+            row.addWidget(self.note, 1); outer.addLayout(row)
+            buttons = QHBoxLayout()
+            self.use_all_button = QPushButton('Use all suggestions'); self.use_all_button.clicked.connect(self.use_all)
+            buttons.addWidget(self.use_all_button); buttons.addStretch(1)
+            close = QPushButton('Close'); close.clicked.connect(self.accept); buttons.addWidget(close)
+            outer.addLayout(buttons)
+            self.refresh()
+        def person(self):
+            owner = session_owner(self)
+            return data_file_person(getattr(owner, 'reviewer_name', '') if owner is not None else '')
+        def refresh(self):
+            self._loading = True
+            self.files = run_folder_files(self.project)
+            self.rows = data_file_rows(self.project, self.files)
+            self.table.setRowCount(0)
+            for row in self.rows:
+                i = self.table.rowCount(); self.table.insertRow(i)
+                suggestion = (row['suggestion'] or {}).get('text', '')
+                values = (row['index'], row['name'], num(row['weight_mg'], 3),
+                          (row['file'] or '—') + '  ▾', row['file_name'],
+                          num(row['file_mass'], 3) if row['file_mass'] is not None else '', row['file_time'],
+                          row['status_text'], suggestion)
+                for col, value in enumerate(values):
+                    item = QTableWidgetItem(str(value))
+                    flags = Qt.ItemIsSelectable | Qt.ItemIsEnabled
+                    if col in (self.NAME, self.MASS):
+                        flags |= Qt.ItemIsEditable
+                    item.setFlags(flags)
+                    self.table.setItem(i, col, item)
+                    if row['problem']:
+                        item.setBackground(QBrush(QColor('#FFF7ED')))
+                    elif row['status'] == 'not_measured':
+                        item.setForeground(QBrush(QColor('#6B7280')))
+                self.table.item(i, self.NAME).setToolTip('Double-click to correct the name (the original stays in the record).')
+                self.table.item(i, self.MASS).setToolTip('Double-click to correct the mass (the original stays in the record).')
+                self.table.item(i, self.FILE).setToolTip('Click to choose another file or to mark the row as not measured.')
+                self.table.item(i, 7).setToolTip(row['reason'] or row['status_text'])
+                self.table.item(i, 8).setToolTip(suggestion)
+            self.use_all_button.setEnabled(any((r['suggestion'] or {}).get('action') in ('link', 'not_measured') for r in self.rows))
+            self._loading = False
+        def run(self, action):
+            try: action()
+            except Exception as exc:
+                alert(self, 'Not changed', str(exc), True); self.refresh(); return False
+            self.changed = True; self.refresh(); return True
+        def file_choices(self, row):
+            """(label, action, enabled) for the menu of one row's data file."""
+            choices = []
+            suggestion = row['suggestion'] or {}
+            linked = {(r.dat_info or {}).get('sha256'): r for r in self.project.records if (r.dat_info or {}).get('status') == 'verified'}
+            if suggestion.get('action') == 'link':
+                f = next((f for f in self.files if f['path'] == suggestion['path']), None)
+                t = (f or {}).get('trace') or {}
+                label = (f"Suggested: {f['file']}  —  {t.get('header_sample', '')}, {t.get('weight_mg', 0):.3f} mg, {t.get('time', '')}"
+                         if f else 'Suggested: ' + suggestion['text'].replace('Link ', '', 1))
+                choices.append((label, ('link', suggestion['path']), True))
+            free, used = [], []
+            for f in sorted(self.files, key=lambda f: ((f.get('trace') or {}).get('date', '9'), (f.get('trace') or {}).get('time', ''), f['file'])):
+                t = f.get('trace')
+                if not t:
+                    used.append((f"{f['file']}  —  not readable", None, False)); continue
+                other = linked.get(f.get('sha256'))
+                inside = f"{t['header_sample']}, {t['weight_mg']:.3f} mg, {t['time']}"
+                if other is not None and other.index == row['index']:
+                    choices.insert(0, (f"✓ {f['file']}  —  {inside}  (this row)", None, False))
+                elif other is not None:
+                    used.append((f"{f['file']}  —  {inside}  (used by {other.name})", None, False))
+                elif not (suggestion.get('action') == 'link' and f['path'] == suggestion.get('path')):
+                    free.append((f"{f['file']}  —  {inside}", ('link', f['path']), True))
+            if free:
+                choices.append(None); choices.extend(free)
+            if used:
+                choices.append(None); choices.append((f'Files used by other rows ({len(used)})', 'submenu', used))
+            choices.append(None)
+            choices.append(('Choose a file…', ('browse', None), True))
+            if row['status'] == 'not_measured':
+                choices.append(('Measured after all (back to: no file)', ('restore', None), True))
+            elif row['status'] != 'verified':
+                choices.append(('Not measured / lost', ('lost', None), True))
+            if row['status'] == 'verified':
+                choices.append(('No file for this row', ('unlink', None), True))
+            return choices
+        def clicked(self, r, c):
+            if c != self.FILE or not 0 <= r < len(self.rows): return
+            row = self.rows[r]; menu = QMenu(self)
+            for choice in self.file_choices(row):
+                if choice is None: menu.addSeparator(); continue
+                label, action, extra = choice
+                if action == 'submenu':
+                    sub = menu.addMenu(label)
+                    for sub_label, _a, _e in extra:
+                        sub.addAction(sub_label).setEnabled(False)
+                    continue
+                act = menu.addAction(label); act.setEnabled(extra); act.setData(action)
+            rect = self.table.visualItemRect(self.table.item(r, c))
+            chosen = menu.exec(self.table.viewport().mapToGlobal(rect.bottomLeft()))
+            if chosen is not None and chosen.data():
+                self.do(row, *chosen.data())
+        def do(self, row, action, path=None):
+            note, who, index = self.note.text().strip(), self.person(), row['index']
+            if action == 'browse':
+                folder = run_folder_of(self.project)
+                path, _ = QFileDialog.getOpenFileName(self, 'Choose the data file of ' + row['name'], str(folder or ''),
+                                                      'Eager 300 data (*.dat *.DAT);;All files (*)')
+                if not path: return
+                action = 'link'
+            if action == 'link':
+                try:
+                    link_data_file(self.project, index, path, who, note)
+                except DataFileMismatch as exc:
+                    if confirm(self, 'The file does not match this row', str(exc) + '\n\nUse it anyway? The difference is recorded.', 'Use it'):
+                        self.run(lambda: link_data_file(self.project, index, path, who, note, accept_mismatch=True))
+                    return
+                except Exception as exc:
+                    alert(self, 'Not changed', str(exc), True); return
+                self.changed = True; self.refresh()
+            elif action == 'lost': self.run(lambda: mark_not_measured(self.project, index, who, note))
+            elif action == 'restore': self.run(lambda: restore_measurement_row(self.project, index, who, note))
+            elif action == 'unlink': self.run(lambda: unlink_data_file(self.project, index, who, note))
+        def edited(self, r, c):
+            if self._loading or c not in (self.NAME, self.MASS) or not 0 <= r < len(self.rows): return
+            row = self.rows[r]; text = self.table.item(r, c).text().strip()
+            if c == self.NAME:
+                if text == row['name']: return
+                self.run(lambda: correct_measurement(self.project, row['index'], self.person(), self.note.text().strip(), name=text))
+            else:
+                try: mass = float(text.replace(',', '.'))
+                except ValueError:
+                    alert(self, 'Not changed', 'Enter the mass in milligrams, e.g. 2.061.', True); self.refresh(); return
+                if row['weight_mg'] is not None and abs(mass - row['weight_mg']) < 5e-4: self.refresh(); return
+                self.run(lambda: correct_measurement(self.project, row['index'], self.person(), self.note.text().strip(), weight_mg=mass))
+        def use_all(self):
+            rows = [r for r in self.rows if (r['suggestion'] or {}).get('action') in ('link', 'not_measured')]
+            note, who = self.note.text().strip(), self.person()
+            def act():
+                for r in rows:
+                    s = r['suggestion']
+                    if s['action'] == 'link': link_data_file(self.project, r['index'], s['path'], who, note)
+                    else: mark_not_measured(self.project, r['index'], who, note)
+            self.run(act)
 
     class IdentifyPage(BasePage):
         def __init__(self):
@@ -4222,8 +4697,14 @@ def launch_gui():
                 'and Group can be edited; double-click a Group cell to rename it. Separately weighed '
                 'portions of the same material should share the same Group name. Review suggested '
                 'groups before applying them. You can also select several rows and group them or '
-                'exclude whole portions with a recorded reason; exclusions remain visible.')
+                'exclude whole portions with a recorded reason; exclusions remain visible. Data files… shows the file each '
+                'row reads and the sample name, mass and time inside that file; there a file can be linked to another row, '
+                'a name or mass corrected, or a row marked as not measured / lost; each change is recorded.')
             frame,v=card('Measurements')
+            self.files_banner=QLabel();self.files_banner.setWordWrap(True);self.files_banner.setTextFormat(Qt.RichText)
+            self.files_banner.setStyleSheet('QLabel{background:#FFF7ED;border:1px solid #FDBA74;border-radius:6px;padding:7px;color:#7C2D12}')
+            self.files_banner.linkActivated.connect(lambda *_:self.open_data_files());self.files_banner.hide()
+            v.addWidget(self.files_banner)
             self.table=QTableWidget()
             set_table(self.table,['#','Name','Instrument type','Role',
                                   'Group','Mass (mg)','N %','C %','H %','S %','Notes'],(1,4,10))
@@ -4238,17 +4719,19 @@ def launch_gui():
             v.addWidget(self.trace_plot)
             self.table.currentCellChanged.connect(lambda *_:self.show_trace())
             actions=QHBoxLayout()
-            suggestions=QPushButton('Suggest groups…')
-            suggestions.clicked.connect(self.review_groupings)
-            actions.addWidget(suggestions)
-            group_selected=QPushButton('Group selected…')
-            group_selected.clicked.connect(self.group_selected)
-            actions.addWidget(group_selected)
-            exclude_selected=QPushButton('Exclude selected…')
-            exclude_selected.setToolTip('Exclude whole portions from the statistics with a recorded reason. The rows stay visible.')
-            exclude_selected.clicked.connect(self.exclude_selected)
-            actions.addWidget(exclude_selected)
+            self.more_button=QToolButton();self.more_button.setText('More');self.more_button.setPopupMode(QToolButton.InstantPopup)
+            more=QMenu(self.more_button)
+            more.addAction('Suggest groups…',self.review_groupings)
+            more.addAction('Group selected rows…',self.group_selected)
+            more.addAction('Exclude selected rows from the statistics…',self.exclude_selected)
+            self.more_button.setMenu(more)
+            self.data_files_button=QPushButton('Data files…')
+            self.data_files_button.setToolTip('Each measurement, the file it reads and the name, mass and time inside that file. '
+                                              'Link another file, correct a name or mass, or mark a row as not measured.')
+            self.data_files_button.clicked.connect(self.open_data_files)
+            actions.addWidget(self.data_files_button)
             actions.addStretch(1)
+            actions.addWidget(self.more_button)
             v.addLayout(actions)
             self.layout_.addWidget(frame,1)
             self._editor_project=None
@@ -4267,7 +4750,9 @@ def launch_gui():
             self.trace_plot.set_trace(trace);self.trace_plot.set_selected_peak(None);self.trace_plot.set_proposal(None)
             self.trace_plot.set_others([dict(peak) for peak in trace.get('peaks') or [] if peak.get('element') in ELEMENTS],False)
             self.trace_plot.reset_view()
-            self.trace_plot.title=f'{record.name}  ·  {record.role}  ·  {num(record.weight_mg,3)} mg  ·  the instrument\'s peaks'
+            source=(record.dat_info or {}).get('source') or ''
+            self.trace_plot.title=(f'{record.name}  ·  {record.role}  ·  {num(record.weight_mg,3)} mg  ·  the instrument\'s peaks'
+                                   +(f'  ·  file {Path(str(source).split(" :: ")[-1]).name}' if source else ''))
             self.trace_plot.hint=''
             self.trace_plot.update()
         def initializePage(self):
@@ -4285,8 +4770,8 @@ def launch_gui():
                 zero_convention=[e for e in ELEMENTS if measurement_state(r,e)=='reported_zero']
                 if zero_convention:review_notes.append('Reported saved zero: '+', '.join(zero_convention))
                 for col,value in ((0,r.index),(1,r.name),(2,r.instrument_type),(5,num(r.weight_mg,3)),
-                                  (6,num(r.values.get('N'),6)),(7,num(r.values.get('C'),6)),
-                                  (8,num(r.values.get('H'),6)),(9,num(r.values.get('S'),6)),
+                                  (6,screen_number(r.values.get('N'))),(7,screen_number(r.values.get('C'))),
+                                  (8,screen_number(r.values.get('H'))),(9,screen_number(r.values.get('S'))),
                                   (10,'; '.join(review_notes))):
                     self.table.setItem(i,col,row_item(value))
                 if review_notes:
@@ -4311,6 +4796,25 @@ def launch_gui():
             self._loading=False
             if self.table.rowCount() and self.table.currentRow()<0:self.table.setCurrentCell(0,1)
             self.show_trace()
+            self.refresh_files_banner()
+        def refresh_files_banner(self):
+            p=self.project
+            native=p is not None and any(_native_row(r) for r in p.records)
+            self.data_files_button.setVisible(native)
+            problems=data_file_problems(p) if native else []
+            if problems:
+                names=', '.join(r.name for r in problems[:6])+(' …' if len(problems)>6 else '')
+                self.files_banner.setText(f'⚠ {len(problems)} measurement{"s" if len(problems)!=1 else ""} without a usable data file: '
+                                          f'{names}. <a href="files">Data files…</a> shows what is inside the files and suggests a fix.')
+                self.files_banner.show()
+            else:
+                self.files_banner.hide()
+        def open_data_files(self):
+            if self.project is None or not self.validatePage():return
+            dialog=DataFilesDialog(self.project,self);dialog.exec()
+            if dialog.changed:
+                self.wizard().update_dirty_state() if hasattr(self.wizard(),'update_dirty_state') else None
+            self.initializePage()
         def editor_values(self):
             if self._editor_project is not self.project:return None
             return [{'index':int(self.table.item(i,0).text()),
@@ -4386,11 +4890,11 @@ def launch_gui():
                 'count controls only a warning. Outliers are never deleted automatically. '
                 'The RSD warning must be enabled explicitly. A reference composition is chosen '
                 'manually; the run date never selects one automatically. Check-material '
-                'differences do not imply automatic pass/fail. The reference menu on this page '
-                'controls comparison only. Use More review tools in Step 6 to inspect '
+                'differences do not imply automatic pass/fail. The certificate the check material is compared with '
+                'is chosen in step 4 (comparison only). Use More review tools in Step 6 to inspect '
                 'and record an optional additive sample correction separately. Laboratory presets store only '
-                'portion count, RSD settings, the comparison reference and check-report inclusion. Choose a preset, '
-                'review its values and click Use preset to fill the controls. Next applies them to this project. '
+                'portion count, RSD settings, the comparison reference and check-report inclusion. Presets fills the '
+                'settings from a saved preset or saves these settings as one; Next applies them to this project. '
                 'A preset never copies sample identities, recorded decisions, source approval or correction offsets.')
             frame,v=card('Settings')
             form=QFormLayout();form.setHorizontalSpacing(14);form.setVerticalSpacing(9)
@@ -4412,6 +4916,11 @@ def launch_gui():
             menu.addAction('Export selected preset…',self.export_selected_preset)
             menu.addAction('Import a preset…',self.import_preset)
             self.preset_more.setMenu(menu);row.addWidget(self.preset_more)
+            for widget in (self.preset_combo,self.preset_use,self.preset_save,self.preset_more):widget.hide()
+            self.presets_button=QToolButton();self.presets_button.setText('Presets');self.presets_button.setPopupMode(QToolButton.InstantPopup)
+            self.presets_button.setToolTip('Fill the settings below from a saved laboratory preset, or save these settings as one.')
+            self.presets_menu=QMenu(self.presets_button);self.presets_menu.aboutToShow.connect(self.build_presets_menu)
+            self.presets_button.setMenu(self.presets_menu);row.addWidget(self.presets_button);row.addStretch(1)
             form.addRow('Laboratory preset:',row)
             self.preset_preview=caption('');self.preset_status=caption('')
             notes_box=QVBoxLayout();notes_box.setSpacing(2);notes_box.addWidget(self.preset_preview);notes_box.addWidget(self.preset_status)
@@ -4434,8 +4943,9 @@ def launch_gui():
             row=QHBoxLayout()
             self.ref=QComboBox();self.ref.addItems(list(REFERENCES))
             self.ref.setToolTip('Comparison only. A sample correction is previewed and recorded separately in Step 6 (More).')
-            row.addWidget(self.ref,1)
-            self.check_in_report=QCheckBox('Include check groups in the report');row.addWidget(self.check_in_report)
+            row.addWidget(self.ref,1);self.ref.hide()  # the certificate batch is chosen in step 4, where its effect shows
+            self.check_in_report=QCheckBox('Include its results in the report');row.addWidget(self.check_in_report)
+            note=caption('(its certificate is chosen in step 4)');note.setWordWrap(False);row.addWidget(note);row.addStretch(1)
             form.addRow('Check material:',row)
             self.notes=QTextEdit();self.notes.setPlaceholderText('Optional');self.notes.setMaximumHeight(70)
             form.addRow('Analyst notes:',self.notes)
@@ -4508,6 +5018,27 @@ def launch_gui():
             self.preset_combo.setCurrentIndex(index if index>=0 else 0)
             self.preset_combo.blockSignals(False)
             self.update_preset_preview()
+        def build_presets_menu(self):
+            menu=self.presets_menu;menu.clear();self.refresh_presets()
+            if self._presets:
+                for preset in self._presets:
+                    menu.addAction('Use “'+preset['name']+'”',lambda name=preset['name']:self.use_named_preset(name))
+            else:
+                menu.addAction('No saved presets yet').setEnabled(False)
+            menu.addSeparator()
+            menu.addAction('Save these settings as a preset…',self.save_current_preset)
+            if self._presets:
+                manage=menu.addMenu('Rename, delete or export a preset')
+                for label,function in (('Rename',self.rename_selected_preset),('Delete',self.delete_selected_preset),
+                                       ('Export',self.export_selected_preset)):
+                    sub=manage.addMenu(label)
+                    for preset in self._presets:
+                        sub.addAction(preset['name'],lambda name=preset['name'],function=function:(self.select_preset(name),function()))
+            menu.addAction('Import a preset…',self.import_preset)
+        def select_preset(self,name):
+            index=self.preset_combo.findData(name);self.preset_combo.setCurrentIndex(max(0,index))
+        def use_named_preset(self,name):
+            self.select_preset(name);return self.use_selected_preset()
         def selected_preset(self):
             name=self.preset_combo.currentData()
             return next((copy.deepcopy(p) for p in self._presets if p['name']==name),None)
@@ -5254,7 +5785,8 @@ def launch_gui():
                 xs.append(self.sample['amount']);ys.append(self.sample['area'])
             x1=max(xs) if max(xs)>0 else 1.0;y1=max(ys) if max(ys)>0 else 1.0
             x0=min(xs);y0=min(ys)
-            return x0-(x1-x0)*.04,x1+(x1-x0)*.10,y0-(y1-y0)*.05,y1+(y1-y0)*.12
+            # Both axes start at 0 (no negative amounts or areas to show) and end a little above the largest point.
+            return (0.0 if x0>=0 else x0-(x1-x0)*.04),x1+(x1-x0)*.10,(0.0 if y0>=0 else y0-(y1-y0)*.05),y1+(y1-y0)*.12
         def limits(self):return self._range or self.full_limits()
         def rect(self):return QRectF(78,28,max(1,self.width()-96),max(1,self.height()-66))
         def to_screen(self,x,y):
@@ -5275,12 +5807,17 @@ def launch_gui():
             if not pts and not missing:
                 p.setPen(QColor('#64748B'));p.drawText(r,Qt.AlignCenter|Qt.TextWordWrap,'No calibration standards are available for this element.');p.end();return
             x0,x1,y0,y1=self.limits()
-            for j in range(5):
-                f=j/4;x=r.left()+r.width()*f;y=r.bottom()-r.height()*f
-                p.setPen(QPen(QColor('#E5EBF1'),1));p.drawLine(QPointF(x,r.top()),QPointF(x,r.bottom()));p.drawLine(QPointF(r.left(),y),QPointF(r.right(),y))
-                p.setPen(QColor('#64748B'))
-                p.drawText(QRectF(x-34,r.bottom()+3,68,16),Qt.AlignCenter,f'{x0+f*(x1-x0):.3g}')
-                p.drawText(QRectF(1,y-9,72,18),Qt.AlignRight|Qt.AlignVCenter,f'{y0+f*(y1-y0):,.0f}')
+            self._tick_boxes=[]
+            for value,label in self.axis_ticks(x0,x1):
+                x=self.to_screen(value,y0).x()
+                p.setPen(QPen(QColor('#E5EBF1'),1));p.drawLine(QPointF(x,r.top()),QPointF(x,r.bottom()))
+                box=QRectF(x-34,r.bottom()+3,68,16);self._tick_boxes.append(box)
+                p.setPen(QColor('#64748B'));p.drawText(box,Qt.AlignCenter,label)
+            for value,label in self.axis_ticks(y0,y1,area=True):
+                y=self.to_screen(x0,value).y()
+                p.setPen(QPen(QColor('#E5EBF1'),1));p.drawLine(QPointF(r.left(),y),QPointF(r.right(),y))
+                box=QRectF(1,y-9,72,18);self._tick_boxes.append(box)
+                p.setPen(QColor('#64748B'));p.drawText(box,Qt.AlignRight|Qt.AlignVCenter,label)
             p.setPen(QColor('#475569'))
             p.drawText(QRectF(r.left(),self.height()-20,r.width(),18),Qt.AlignCenter,NAMES.get(self.element,'Element').lower()+' in the portion (mg)')
             p.save();p.translate(11,r.center().y());p.rotate(-90)
@@ -5339,14 +5876,27 @@ def launch_gui():
             p.restore();p.setPen(QPen(QColor('#CAD5E2'),1));p.drawRect(r)
             self._draw_axis_tags(p,r)
             p.end()
+        @staticmethod
+        def axis_ticks(lo,hi,area=False):
+            """Round axis numbers (0, 0.2, 0.4 mg; 1 000 000, 2 000 000) between lo and hi."""
+            ticks=_figure_axes_ticks(lo,hi,4)
+            step=ticks[1]-ticks[0] if len(ticks)>1 else 1.0
+            out=[]
+            for value in ticks:
+                if abs(value)<step*1e-9:value=0.0
+                if area:label=f'{value:,.0f}'.replace(',',' ')
+                else:
+                    decimals=max(0,-int(math.floor(math.log10(step)+1e-9))) if step>0 else 3
+                    label=f'{value:.{decimals}f}'
+                out.append((value,label))
+            return out
         def axis_tag_texts(self):
             # The words written where the dashed lines meet the axes: (mass on the bottom axis, area on the left axis).
             return [(f'{x:.4f} mg',format_area(y)) for x,y,_,_ in getattr(self,'_axis_tags',[])]
         def _draw_axis_tags(self,p,r):
             plain=QFont(p.font());plain.setBold(False);p.setFont(plain);metrics=QFontMetricsF(plain)
             # Tick labels a value would half-cover are blanked first, so the value reads alone.
-            x_ticks=[QRectF(r.left()+r.width()*j/4-34,r.bottom()+3,68,16) for j in range(5)]
-            y_ticks=[QRectF(1,r.bottom()-r.height()*j/4-9,72,18) for j in range(5)]
+            x_ticks=list(getattr(self,'_tick_boxes',[]));y_ticks=[]
             def blank(box,ticks):
                 for tick in ticks:
                     if tick.intersects(box.adjusted(-3,-1,3,1)):p.fillRect(tick,QColor('white'))
@@ -5651,9 +6201,9 @@ def launch_gui():
             source_actions.addWidget(caption('Inspect another saved state of this measurement before deciding whether to reuse its boundaries.'),1)
             source_layout.addLayout(source_actions);source_layout.addWidget(self.calibration_text,1)
             self.tabs.addTab(source_page,'Source and history')
-            review=QHBoxLayout();review.addWidget(QLabel('Reviewer:'));self.reviewer=reviewer_edit(self);self.reviewer.setMaximumWidth(190)
+            review=QHBoxLayout();review.addWidget(quiet_label('Reviewer:'));self.reviewer=reviewer_edit(self);self.reviewer.setMaximumWidth(190)
             self.reviewer.setPlaceholderText('Name or initials');review.addWidget(self.reviewer)
-            review.addWidget(QLabel('Reason:'));self.reason=QLineEdit();self.reason.setPlaceholderText('Why you accept this processing or manual revision');review.addWidget(self.reason,1);layout.addLayout(review)
+            review.addWidget(QLabel('Note (optional):'));self.reason=QLineEdit();self.reason.setPlaceholderText('Why you accept this processing or manual revision');review.addWidget(self.reason,1);layout.addLayout(review)
             final=QHBoxLayout();self.undo_button=QPushButton('Undo preview');self.redo_button=QPushButton('Redo preview')
             self.undo_button.clicked.connect(self.undo_preview);self.redo_button.clicked.connect(self.redo_preview)
             final.addWidget(self.undo_button);final.addWidget(self.redo_button)
@@ -6156,7 +6706,6 @@ def launch_gui():
             if self._numeric_dirty or self._assignment_dirty:
                 alert(self,'Recalculate the interval first','Your interval or element-assignment controls have changed. Press Recalculate interval so those choices are recorded in the preview before Apply.',True);return
             reviewer=self.reviewer.text().strip();reason=self.reason.text().strip()
-            if not reviewer or not reason:alert(self,'Record the processing decision','Enter the reviewer and reason before applying this preview.',True);return
             controls=self._settings_from_controls();settings=self.preview.get('settings') or {}
             if controls!=settings:
                 alert(self,'Rebuild the preview','The settings have changed since this preview was calculated. Build a new preview so its values reflect those settings.',True);return
@@ -6170,7 +6719,6 @@ def launch_gui():
             except Exception as exc:alert(self,'Processing was not applied',exc,True)
         def restore_imported(self):
             reviewer=self.reviewer.text().strip();reason=self.reason.text().strip()
-            if not reviewer or not reason:alert(self,'Record the restoration','Enter the reviewer and reason before restoring imported results.',True);return
             if not confirm(self,'Restore imported results?','This restores the original imported values and keeps the recorded processing history.','Restore imported results'):return
             try:
                 restore_native_processing(self.project,reviewer,reason);self.changed=True
@@ -6292,14 +6840,15 @@ def launch_gui():
             applied=any((v or {}).get('active') for r in self.project.records for v in (getattr(r,'processed_results',{}) or {}).values())
             return 'saved_bounds' if applied else 'automatic'
         def build(self,basis):
-            QApplication.setOverrideCursor(Qt.WaitCursor)
+            function=preview_native_processing if basis=='automatic' else processing_saved_preview
+            project=self.project
+            def work():
+                preview=function(project,processing_default_settings(project))
+                return auto_select_standards(project,preview)
             try:
-                function=preview_native_processing if basis=='automatic' else processing_saved_preview
-                self.preview=function(self.project,processing_default_settings(self.project))
-                self.preview,self.auto_choices=auto_select_standards(self.project,self.preview)
+                self.preview,self.auto_choices=run_busy(self,'Integrating every peak of the run and fitting the calibration curves…',work)
             except Exception as exc:
                 self.preview=None;self.notice='The integration could not be calculated: '+str(exc)
-            finally:QApplication.restoreOverrideCursor()
             self.edited=False;self.history=[];self.future=[];self.manual_baseline=set()
         def load(self,project):
             if project is not self.project:
@@ -6698,8 +7247,8 @@ def launch_gui():
             counts_label=QLabel();counts_label.setWordWrap(True);box.addWidget(counts_label)
             accept=QCheckBox('Also report results that need review — I have looked at their chromatograms')
             box.addWidget(accept)
-            form=QHBoxLayout();form.addWidget(QLabel('Reviewer:'));reviewer=reviewer_edit(self);reviewer.setMaximumWidth(180)
-            form.addWidget(reviewer);form.addWidget(QLabel('Reason:'));reason=QLineEdit();reason.setPlaceholderText('e.g. boundaries checked for all peaks')
+            form=QHBoxLayout();form.addWidget(quiet_label('Reviewer:'));reviewer=reviewer_edit(self);reviewer.setMaximumWidth(180)
+            form.addWidget(reviewer);form.addWidget(QLabel('Note (optional):'));reason=QLineEdit();reason.setPlaceholderText('e.g. boundaries checked for all peaks')
             form.addWidget(reason,1);box.addLayout(form)
             excluded=self.excluded_points()
             if excluded:
@@ -6718,14 +7267,13 @@ def launch_gui():
             if dialog.exec()!=QDialog.Accepted:return
             preview=self.preview
             if excluded:
-                if not reason.text().strip():
-                    alert(self,'A reason is needed','Record why the calibration standards were excluded.',True);return
                 try:
                     for element,point_id,_,old in excluded:
                         preview=processing_update_calibration(self.project,preview,element,point_id,False,
                                                               'Excluded in the calibration plot: '+reason.text().strip())
                 except Exception as exc:alert(self,'The report was not changed',exc,True);return
-            try:apply_native_processing(self.project,preview,reviewer.text().strip(),reason.text().strip(),include_review=accept.isChecked())
+            try:run_busy(self,'Applying the integration and calibration to every measurement…',apply_native_processing,
+                         self.project,preview,reviewer.text().strip(),reason.text().strip(),include_review=accept.isChecked())
             except Exception as exc:alert(self,'The report was not changed',exc,True);return
             self.preview=copy.deepcopy(self.project.processing.get('active_preview'))
             self.edited=False;self.history=[];self.future=[]
@@ -7319,12 +7867,17 @@ def launch_gui():
         FIRST=2  # first element column (N); then C, H, S
         def __init__(self):
             super().__init__('Step 6 of 7: Results','',
-                'The numbers of the report. When steps 4 and 5 are right, apply them to the report.',
+                'The numbers of the report, with the integration and calibration of steps 4 and 5.',
                 'The table holds exactly the numbers of the final laboratory report: portion values, averages and sample '
                 'standard deviations (n−1). Missing, held, excluded, below-limit and formula-derived results stay empty.\n'
-                'Until you apply them, your calibration (step 4) and integration (step 5) are a preview: the bar above the table '
-                'says how many values would change. Apply to report asks for a reviewer and a reason; standards and samples of the '
-                'whole run are then recalculated together. Original instrument values stay in the project and can be restored.\n'
+                'By default the report uses the calibration (step 4) and integration (step 5) that you checked: standards and '
+                'samples of the whole run are recalculated together, recorded once with your name. Where the instrument found no '
+                'peak, a peak found by CHNSetti is reported only when it is clear (signal-to-noise at least 10, no competing peak); '
+                'a weaker one stays 0 until you confirm it in step 5. "Use the instrument\'s results instead" in the bar keeps '
+                'the instrument\'s values for this run; Apply to report puts CHNSetti\'s in again. Original instrument values '
+                'always stay in the project.\n'
+                'Failed: a portion in which almost nothing burned, or an element missing that every other portion of the sample '
+                'contains, is left out of the mean instead of being counted as 0; the result says which and why.\n'
                 'Orange number: the amount of the element in that portion lies outside the range of the standards, so the result is '
                 'extrapolated (hover for the numbers).\n'
                 'Double-click a value or press How calculated to see its inputs and arithmetic. Show peak opens the chromatogram of '
@@ -7380,10 +7933,57 @@ def launch_gui():
             # The choice lives in Calculation rules (step 3); kept here for scripts and tests.
             owner=self.wizard()
             return owner.set_boundary_method(key) if owner is not None else False
+        def apply_default(self):
+            # What steps 4-5 show is reported, unless the user chose the instrument's results for this run.
+            panel=self.panel;owner=self.wizard()
+            if (panel is None or panel.project is not self.project or panel.preview is None or panel.preview_in_report()
+                    or (self.project.processing or {}).get('report_basis')=='instrument'):return
+            if owner is not None and not owner.ensure_pending_committed():return
+            reviewer=(getattr(owner,'reviewer_name','') or '').strip()
+            if not reviewer:
+                try:
+                    import getpass;reviewer=getpass.getuser()+' (computer login)'
+                except Exception:reviewer='analyst (computer login)'
+            project=self.project;start=panel.preview
+            def work():
+                preview,done=default_report_preview(project,start)
+                apply_native_processing(project,preview,reviewer,DEFAULT_REPORT_REASON,include_review=True)
+                self._precomputed=(compute_results(project,reporting=True),compute_results(project,reporting=False))
+                return done
+            try:
+                done=run_busy(self,'Applying the integration and calibration of steps 4–5 to the report…',work)
+            except Exception as exc:
+                self._precomputed=None;self.default_error=str(exc);return
+            self.default_error='';self.default_done=done
+            self.project.processing['report_basis']='chnsetti'
+            panel.preview=copy.deepcopy(self.project.processing.get('active_preview'));panel.edited=False
+            panel.store_pending()
+        def use_instrument_results(self):
+            owner=self.wizard()
+            reviewer=(getattr(owner,'reviewer_name','') or '').strip()
+            if not reviewer:
+                try:
+                    import getpass;reviewer=getpass.getuser()+' (computer login)'
+                except Exception:reviewer='analyst (computer login)'
+            try:restore_native_processing(self.project,reviewer,'The instrument\'s results chosen for the report in step 6')
+            except Exception as exc:alert(self,'Not changed',exc,True);return
+            self.project.processing['report_basis']='instrument'
+            panel=self.panel
+            if panel is not None:panel.edited=True
+            self.initializePage()
         def initializePage(self):
             if self.project is None:return
-            self.results=compute_results(self.project,reporting=True)
-            self.accepted_results={(g.role,g.name):g for g in compute_results(self.project,reporting=False)}
+            panel=self.panel
+            if panel is not None and any(_processing_trace(r) for r in self.project.records):
+                if panel.project is not self.project or panel.preview is None:panel.load(self.project)
+                self.apply_default()
+            precomputed=getattr(self,'_precomputed',None);self._precomputed=None
+            if precomputed is None:
+                project=self.project
+                precomputed=run_busy(self,'Calculating the results…',
+                                     lambda:(compute_results(project,reporting=True),compute_results(project,reporting=False)))
+            self.results=precomputed[0]
+            self.accepted_results={(g.role,g.name):g for g in precomputed[1]}
             self.issues=review_issues(self.project)
             merged=merge_issue_rows(self.issues)
             counts={severity:sum(i['severity']==severity for i in merged) for severity in self.CATEGORY}
@@ -7409,10 +8009,22 @@ def launch_gui():
             native=bool(self.project) and panel is not None and panel.project is self.project and panel.preview is not None
             self.banner.setVisible(native)
             if not native:return
+            if not getattr(self,'_banner_linked',False):
+                self.banner_text.linkActivated.connect(lambda link:self.use_instrument_results() if link=='instrument' else None)
+                self._banner_linked=True
             if panel.preview_in_report():
                 self.banner.setStyleSheet('QFrame#applyBanner {background:#ECFDF5; border:1px solid #A7F3D0; border-radius:6px;}')
-                self.banner_text.setText('<span style="color:#166534;">✓ The report uses your integration and calibration from steps 4–5.</span>')
+                done=getattr(self,'default_done',None) or {}
+                extra=''
+                if done.get('zero'):extra=f' {len(done["zero"])} small or uncertain peak(s) where the instrument found none are reported as 0 (see step 5).'
+                self.banner_text.setText('<span style="color:#166534;">✓ The report uses CHNSetti\'s integration and calibration from steps 4–5.'+extra+
+                                         ' <a href="instrument">Use the instrument\'s results instead</a></span>')
                 self.apply_button.setVisible(False);return
+            if getattr(self,'default_error',''):
+                self.banner.setStyleSheet('QFrame#applyBanner {background:#FFF7ED; border:1px solid #FED7AA; border-radius:6px;}')
+                self.banner_text.setText('<span style="color:#9A3412;">CHNSetti\'s results could not be used by default: '+
+                                         __import__('html').escape(self.default_error)+'</span>')
+                self.apply_button.setVisible(True);return
             changed=panel.differences()
             self.banner.setStyleSheet('QFrame#applyBanner {background:#FFF7ED; border:1px solid #FED7AA; border-radius:6px;}')
             self.banner_text.setText('<span style="color:#9A3412;">Steps 4–5 are not in the report yet: '+
@@ -7422,7 +8034,9 @@ def launch_gui():
         def apply_to_report(self):
             panel=self.panel
             if panel is None or panel.preview is None:return
-            panel.apply_to_report();self.initializePage()
+            panel.apply_to_report()
+            if panel.preview_in_report():self.project.processing['report_basis']='chnsetti'
+            self.initializePage()
         def peak_portions(self):
             # The portions behind the selected avg./stdev. row that have a chromatogram.
             row=self.table.currentRow()
@@ -7493,7 +8107,7 @@ def launch_gui():
                     if r.corrections:notes.append('Reference correction recorded')
                     if any(measurement_state(r,e)=='excluded' for e in ELEMENTS):notes.append('Recorded exclusion')
                     mark='#FEE2E2' if 'Needs a decision' in notes else None
-                    self.line(g,[r.name,num(r.weight_mg,3)]+[report_value_text(r,e,dp=8) for e in ELEMENTS],
+                    self.line(g,[r.name,num(r.weight_mg,3)]+[screen_report_text(r,e) for e in ELEMENTS],
                               False,kind='portion',measurement_index=r.index,note='; '.join(notes),mark=mark)
                     row=self.table.rowCount()-1
                     for column,e in enumerate(ELEMENTS,self.FIRST):
@@ -7501,8 +8115,8 @@ def launch_gui():
                         if why:
                             item.setForeground(QBrush(QColor('#C2410C')));item.setToolTip(item.toolTip()+'\n'+why)
                 notes=[self.CATEGORY[item['severity']]+': '+item['title'] for item in merge_issue_rows(related) if item['severity']!='info']
-                self.line(g,['avg.','']+[num(g.means[e],4) for e in ELEMENTS],True,kind='mean',note='\n'.join(notes))
-                self.line(g,['stdev.','']+[num(g.sds[e],5) for e in ELEMENTS],True,kind='sd')
+                self.line(g,['avg.','']+[screen_number(g.means[e]) for e in ELEMENTS],True,kind='mean',note='\n'.join(notes))
+                self.line(g,['stdev.','']+[screen_number(g.sds[e]) for e in ELEMENTS],True,kind='sd')
                 self.line(None,['']*6,False)
             self.table.blockSignals(False)
             if self.table.rowCount():
@@ -7737,36 +8351,40 @@ def launch_gui():
         def __init__(self):
             super().__init__('Step 7 of 7: Generate',
                 'Create the laboratory report and the supporting files.',
-                'Record the review, check the output folder, then click Export.',
+                'Sign off when the results are final, check the output folder, then click Export.',
                 'CHNSetti creates a new run-specific folder for every export, containing CHNS results - report.xlsx '
                 '(laboratory format), CHNS results - review.xlsx (with flags), Detailed calculations.xlsx, '
                 'Detailed explanations.docx and Project.CHNSetti.json, which can be opened again with its original '
                 'measurements and decisions.\n'
-                'Until the source review is recorded and the questions that need a decision are resolved, CHNSetti shows '
-                'Review pending. All five files can still be created; the report filename stays the same and the review '
+                'Until the results are signed off and the questions that need a decision are resolved, CHNSetti shows '
+                'Review pending. Click a name in the list to open that peak in step 5. Sign off as final records your computer '
+                'login, the time and the optional note. All five files can still be created; the report filename stays the same and the review '
                 'status is kept in the supporting records. Recording the source review does not perform baseline correction, '
                 'integration or calibration.')
             frame,v=card('Review')
             self.readiness=banner('Review pending.',tone='warn')
             v.addWidget(self.readiness)
-            self.readiness_details=QTextEdit()
+            self.readiness_details=QTextBrowser();self.readiness_details.setOpenLinks(False)
+            self.readiness_details.anchorClicked.connect(self.open_item)
             self.readiness_details.setReadOnly(True)
             self.readiness_details.setMaximumHeight(170)
             v.addWidget(self.readiness_details)
             review_row=QHBoxLayout()
-            review_row.addWidget(QLabel('Reviewer:'))
+            review_row.addWidget(quiet_label('Reviewer:'))
             self.source_reviewer=reviewer_edit(self)
             self.source_reviewer.setPlaceholderText('Name or initials');self.source_reviewer.setMaximumWidth(190)
             review_row.addWidget(self.source_reviewer)
-            review_row.addWidget(QLabel('Note:'))
+            review_row.addWidget(QLabel('Note (optional):'))
             self.source_note=QLineEdit()
-            self.source_note.setPlaceholderText('Checks performed')
+            self.source_note.setPlaceholderText('e.g. peaks and calibration checked')
             review_row.addWidget(self.source_note,2)
             v.addLayout(review_row)
             confirm_row=QHBoxLayout()
             self.source_confirmed=QCheckBox('I confirm the source and measurement review is complete.')
-            confirm_row.addWidget(self.source_confirmed,1)
-            record_review=QPushButton('Record review')
+            self.source_confirmed.hide()  # pressing Sign off is the confirmation
+            self.signed=caption('');confirm_row.addWidget(self.signed,1)
+            record_review=QPushButton('Sign off as final')
+            record_review.setToolTip('Records that the results are reviewed and final (your computer login, the time and the note).')
             record_review.clicked.connect(self.record_source_review)
             confirm_row.addWidget(record_review)
             v.addLayout(confirm_row)
@@ -7834,22 +8452,50 @@ def launch_gui():
             checks=[]
             for item in merge_issue_rows([i for i in review_issues(self.project) if i['severity']=='check']):
                 checks.append(item['title']+(' — '+', '.join(item['groups']) if item.get('groups') else ''))
-            for title,items in (('Needs a decision',grouped_message_lines(blockers)),
-                               ('Check recommended',['• '+c for c in checks])):
+            import html as _html
+            html=[_html.escape(line) for line in lines]
+            decisions=self.decision_lines(blockers)
+            for title,items in (('Needs a decision (click a name to open it)',decisions),('Check recommended',['• '+_html.escape(c) for c in checks])):
                 if items:
-                    if lines:lines.append('')
-                    lines.append(title+':')
-                    lines.extend(items)
-            self.readiness_details.setPlainText('\n'.join(lines))
-            self.readiness_details.setVisible(bool(lines))
+                    if html:html.append('')
+                    html.append('<b>'+title+'</b>')
+                    html.extend(items)
+            self.readiness_details.setHtml('<br>'.join(html))
+            self.readiness_details.setVisible(bool(html))
+            review=getattr(self.project,'source_review',{}) or {}
+            self.signed.setText(('Signed off by '+str(review.get('reviewer'))+(' — '+str(review.get('note')) if review.get('note') else ''))
+                                if review.get('approved') else '')
+        def decision_lines(self,blockers):
+            """One line per kind of decision, each portion a link to its peak in step 5."""
+            import html as _html, re as _re
+            by_name={}
+            for record in self.project.records:by_name.setdefault(record.name,record)
+            pattern=_re.compile(r'^(.+?), ([NCHS]): (.+)$',_re.S);buckets={};order=[]
+            for message in blockers:
+                match=pattern.match(str(message));key=match.group(3) if match else str(message)
+                if key not in buckets:buckets[key]=[];order.append(key)
+                if match:buckets[key].append((match.group(1),match.group(2)))
+            out=[]
+            for key in order:
+                links=[]
+                for name,element in buckets[key]:
+                    record=by_name.get(name)
+                    label=_html.escape(name+' ('+element+')')
+                    links.append(f'<a href="peak:{record.index}:{element}">{label}</a>' if record is not None and _processing_trace(record) else label)
+                out.append('• '+_html.escape(key)+(' &nbsp;'+', '.join(links) if links else ''))
+            return out
+        def open_item(self,url):
+            text=url.toString()
+            if not text.startswith('peak:'):return
+            _,index,element=text.split(':')
+            owner=self.wizard()
+            if owner is None:return
+            owner.go_to_step(5);QApplication.processEvents()
+            owner.pages[5].focus_measurement(int(index),element)
         def record_source_review(self):
             if self.project is None or not self.wizard().ensure_pending_committed():return
-            reviewer=self.source_reviewer.text().strip()
-            note=self.source_note.text().strip()
-            if not self.source_confirmed.isChecked() or not reviewer or not note:
-                alert(self,'Source review details needed',
-                      'Confirm the source review and enter the reviewer and a note describing the checks performed.',True)
-                return
+            reviewer=self.source_reviewer.text().strip() or computer_login()
+            note=self.source_note.text().strip() or 'Signed off in step 7' 
             try:approve_source(self.project,reviewer=reviewer,note=note)
             except Exception as exc:
                 alert(self,'Source review not recorded',str(exc),True)
@@ -7870,17 +8516,13 @@ def launch_gui():
             self.refresh_readiness()
             folder=self.path.text().strip()
             if not folder:alert(self,'Output folder missing','Choose an output folder.',True);return False
-            progress=QProgressDialog('Generating CHNS results...','',0,0,self)
-            progress.setWindowTitle('CHNSetti');progress.setCancelButton(None)
-            progress.setWindowModality(Qt.WindowModal);progress.setMinimumDuration(0)
-            QApplication.processEvents()
             try:
-                paths=export_analysis(self.project,folder,extra_files=self.extra.isChecked())
+                paths=run_busy(self,'Creating the report, the workbooks and the Word document…',
+                               export_analysis,self.project,folder,extra_files=self.extra.isChecked())
                 # Preserve typed review notes in the project snapshot without recording approval.
                 checkpoint=save_workspace(self.project,paths['Project'],self.wizard().capture_workspace())
             except Exception as exc:
                 alert(self,'Export unsuccessful',str(exc),True);return False
-            finally:progress.close()
             self.paths=paths
             self.status_frame.setVisible(True)
             if not self.wizard().project_path:
@@ -8057,8 +8699,10 @@ def launch_gui():
                 self.button(button).setEnabled(has_project)
             self.save_shortcut.setEnabled(has_project)
             self.save_as_shortcut.setEnabled(has_project)
+            demo=bool(has_project and getattr(self.project,'demo',False))
             self.setWindowTitle(f"{'* ' if dirty else ''}{APP_NAME} {APP_VERSION}"+
-                                (' — '+Path(self.project_path).name if self.project_path else ''))
+                                (' — '+Path(self.project_path).name if self.project_path else '')+
+                                (' — SYNTHETIC DEMONSTRATION' if demo else ''))
             if not has_project:
                 status='No project open'
             else:
@@ -8066,6 +8710,7 @@ def launch_gui():
                 status+='\n'+('Unsaved changes' if dirty else ('Saved' if self.project_path else 'No changes'))
                 if dirty and self.last_recovery_time:status+='\nRecovery copy available'
                 if self._autosave_error:status+='\nRecovery save unavailable'
+                if getattr(self.project,'demo',False):status='SYNTHETIC DEMONSTRATION\nno laboratory data\n\n'+status
             self.steps.save_status.setText(status)
             self.steps.save_status.setToolTip(self._autosave_error or self.project_path)
 
@@ -8473,19 +9118,23 @@ def main(argv=None):
     p.add_argument('--native-mode', choices=('auto', 'saved_dat', 'summary'), default='auto',
                    help='Auto uses MTH + DAT; saved_dat skips SUM; summary explicitly uses SUM')
     p.add_argument('--name',default='',help='Name of this run')
-    p.add_argument('--reference',choices=list(REFERENCES),default='None (do not compare)')
+    p.add_argument('--reference',choices=list(REFERENCES),default=None,help='Certificate batch of the check material (default: the newest batch dated on or before the run, as in the wizard)')
     p.add_argument('--expected-replicates',type=int,default=3)
     p.add_argument('--extra-files',action='store_true',help='Write Results.csv and Audit.json too')
-    p.add_argument('--process-native',action='store_true',help='Propose and apply detector processing; unresolved results are withheld')
+    p.add_argument('--process-native',action='store_true',help="Report CHNSetti's integration and calibration with the wizard's default rules (clear new peaks reported, weak ones 0, failed portions left out)")
     p.add_argument('--processing-settings',help='Reusable CHNSetti processing settings JSON')
     p.add_argument('--reviewer',default='',help='Reviewer for an applied processing decision')
     p.add_argument('--reason',default='',help='Reason for applying processing')
-    p.add_argument('--accept-processing-checks',action='store_true',help='Explicitly accept finite reviewed candidates; missing assignments stay unresolved')
+    p.add_argument('--accept-processing-checks',action='store_true',help='Kept for older scripts; --process-native now applies the same rules as the wizard')
+    p.add_argument('--all-standards',action='store_true',help='With --process-native: keep all calibration standards (no default choice of standards)')
     sub2=sub.add_parser('list-archive',help='Show CHNS .MTH runs and spreadsheet options in a history ZIP')
     sub2.add_argument('archive')
     parser.add_argument('--check-demo',action='store_true',help='Validate synthetic demonstration and export to temp')
+    parser.add_argument('--write-demo',metavar='FOLDER',help='Write the synthetic demonstration run (.MTH and .DAT files) to FOLDER')
     parser.add_argument('--make-exe',action='store_true',help='Build standalone program with PyInstaller')
     args=parser.parse_args(argv)
+    if args.write_demo:
+        print(write_demo_files(args.write_demo));return 0
     if args.check_demo:
         with tempfile.TemporaryDirectory(prefix='chnsetti_check_') as tmp:return check_demo(output=tmp)
     if args.make_exe:
@@ -8495,11 +9144,17 @@ def main(argv=None):
         return 0
     if args.cmd=='analyze':
         pr=import_file(args.input,args.member,run_name=args.name,companion=args.companion,native_mode=args.native_mode)
-        set_settings(pr,reference_table=args.reference,expected_replicates=args.expected_replicates)
+        set_settings(pr,reference_table=args.reference or pr.settings.reference_table,expected_replicates=args.expected_replicates)
         if args.process_native:
             cfg=processing_import_settings(args.processing_settings) if args.processing_settings else None
             preview=preview_native_processing(pr,cfg)
-            apply_native_processing(pr,preview,args.reviewer,args.reason,include_review=args.accept_processing_checks)
+            if not args.all_standards:
+                preview,choices=auto_select_standards(pr,preview)
+                for c in choices:print(f"Default choice of standards, {c['element']}: left out "+', '.join(c['excluded']))
+            preview,done=default_report_preview(pr,preview)
+            apply_native_processing(pr,preview,args.reviewer or computer_login(),args.reason or DEFAULT_REPORT_REASON,include_review=True)
+            print(f"CHNSetti results in the report: {len(done['confirmed'])} new peak(s) confirmed, "
+                  f"{len(done['zero'])} weak or uncertain peak(s) and {len(done.get('absent', []))} absent element(s) reported as 0")
         print('Detected:',analysis_summary(pr))
         for w in pr.input_warnings:print('WARNING:',w)
         paths=export_analysis(pr,args.output,extra_files=args.extra_files)
@@ -8673,11 +9328,35 @@ def _invalidate_source_review(project):
         project.source_review['invalidated_utc'] = utc_now()
 
 
+def plain_import_note(text):
+    """An import note in plain words: (sentence, list of names or '')."""
+    text = str(text)
+    m = re.match(r'Eager 300 file log \(cc\.cc\): (\d+) measurement files were saved again after the run \(([^)]*)\)\..*?: (.*?)\.?$', text, re.S)
+    if m:
+        return (f'{m[1]} measurements were re-integrated in Eager after the run ({m[2]}): their saved peaks and percentages '
+                'are the analyst\'s revisions, not the instrument\'s first processing. CHNSetti integrates the detector signal itself.', m[3])
+    m = re.match(r'(\d+) method entries have missing, ambiguous, mismatched or unsupported measurement files', text)
+    if m:
+        return (f'{m[1]} row{"s" if m[1] != "1" else ""} of the sequence have no usable data file. Step 2, Data files…, shows what '
+                'is inside the files and suggests a fix.', '')
+    if text.startswith('The MTH contains duplicate data identifiers'):
+        return ('Some rows of the sequence share one data-file name (the instrument reused it). Step 2, Data files…, sorts it out.', '')
+    return text, ''
+
+
+def computer_login():
+    try:
+        import getpass
+        return getpass.getuser() + ' (computer login)'
+    except Exception:
+        return 'unknown (computer login unavailable)'
+
+
 def _review_identity(reviewer, reason):
+    """Who and why for a recorded decision. Since 1.0.0 neither has to be typed: the computer login is recorded
+    when no name is given, and the action itself is recorded when no note is given."""
     reviewer, reason = tidy(reviewer), tidy(reason)
-    if not reviewer or not reason:
-        raise ValueError('Enter a reviewer name and a reason / source verification note.')
-    return reviewer, reason
+    return reviewer or computer_login(), reason or 'No note given' 
 
 
 def apply_measurement_reviews(project, edits, reviewer, reason):
@@ -8881,6 +9560,12 @@ def apply_revision_import(project, candidate, mappings, reviewer, reason,
 
 
 def report_readiness(project):
+    initialize_project_review(project)
+    assess_portions(project)
+    return _report_readiness_before_portions(project)
+
+
+def _report_readiness_before_portions(project):
     """Use the same unresolved-measurement predicate as Review results.
 
     The gate applies to rows included in the final report. It changes report
@@ -8910,7 +9595,7 @@ def report_readiness(project):
             warnings.append(f'{record.name}: '+', '.join(record.review_flags))
     approval = project.source_review
     if not approval.get('approved') or approval.get('fingerprint') != project_fingerprint(project):
-        blockers.append('Record source verification with reviewer and note before producing a reviewed final report.')
+        blockers.append('Sign off the results as final (step 7).')
     # Generate's normal quality notes describe the same inputs as its report.
     # Accepted-source diagnostics remain available in the technical details.
     for group in compute_results(project, reporting=True):
@@ -10114,6 +10799,10 @@ def _saved_zero_report_eligible(r, e):
 
 def report_value(record, element):
     """The one numerical reporting provider used by previews and exports."""
+    if getattr(record, '_failed_portion', ''):
+        return None  # failed portion: left out, not 0
+    if (getattr(record, '_failed_elements', {}) or {}).get(element):
+        return None  # absent (0 or no value) here but present in another portion: left out, not 0
     value = accepted_value(record, element)
     if value is not None:
         return value
@@ -10126,6 +10815,8 @@ def report_value_text(r, e, dp=8):
     value = report_value(r, e)
     if value is not None:
         return f'{value:.{dp}f}'
+    if getattr(r, '_failed_portion', '') or (getattr(r, '_failed_elements', {}) or {}).get(e):
+        return 'Failed'
     if measurement_state(r, e) == 'unquantified':
         return 'Missing' if source_value(r, e) is None and not active_formula(r, e) else 'Held'
     return review_value_text(r, e, dp=dp)
@@ -10172,6 +10863,12 @@ def _unresolved_selected_source(record, element):
 
 
 def measurement_needs_decision(record, element):
+    if portion_failure(record) or portion_failure(record, element):
+        return False  # left out of the mean by the failed-portion rule (shown in the report with its reason)
+    return _measurement_needs_decision_before_portions(record, element)
+
+
+def _measurement_needs_decision_before_portions(record, element):
     """Display predicate for unresolved inputs; never changes source decisions.
 
     Identity confirmation is represented separately by review_issues().
@@ -10261,6 +10958,13 @@ def review_issues(project):
     if not any(r.role == 'Sample' for r in records):
         add('no_samples', 'decision', 'Identify the research samples',
             'No research sample groups are available. Confirm the sample roles and group names.', 'review_grouping', records)
+    failed_portions = [r for r in records if r.role == 'Sample' and (getattr(r, '_failed_portion', '') or getattr(r, '_failed_elements', {}))]
+    if failed_portions:
+        add('failed_portion', 'check', 'Failed portions left out of the mean',
+            'These portions look failed compared with the other portions of their sample (almost nothing burned, or an element '
+            'missing that the other portions contain). They are left out of the mean instead of being counted as 0. Measure '
+            'them again, or accept the value in Review measurements if it is real.', 'review_measurements', failed_portions,
+            details=[r.name + ': ' + (r._failed_portion or '; '.join(r._failed_elements.values())) for r in failed_portions])
     unconfirmed = [r for r in records if not r.identity_reviewed or not tidy(r.group or r.name)]
     if unconfirmed:
         add('identity', 'decision', 'Confirm sample roles and groups',
@@ -10322,11 +11026,11 @@ def review_issues(project):
         different_peaks = [p for p in trace.get('peaks', []) if p.get('replay_status') in ('different', 'invalid_bounds')]
         different_elements = [e for e, c in (calibration.get('channels') or {}).items()
                               if c.get('status') == 'different']
-        if different_peaks:
+        if different_peaks and record.role not in ('Bypass', 'Ignore'):
             add('native_integration_replay', 'check', 'Inspect saved peak integration',
                 'A straight-baseline replay does not reproduce every saved area. Inspect the chromatogram; saved results are retained.',
                 'native_processing', [record], details=[record.name + ': peak ' + ', '.join(str(p['index']) for p in different_peaks)])
-        if different_elements and record.role != 'Calibration':
+        if different_elements and record.role not in ('Calibration', 'Bypass', 'Ignore'):
             add('native_coefficient_replay', 'check', 'Inspect the calibration processing state',
                 'The method coefficient does not reproduce every saved concentration. Another calibration or processing state may apply; saved results are retained.',
                 'native_processing', [record], different_elements, [record.name])
@@ -13618,7 +14322,8 @@ def _processing_start_preview(project, settings=None, mode='automatic'):
                'notice': 'Standards and samples use the same unsmoothed-signal integration policy. '
                          'Reference compositions, blank area and calibration choice require review. '
                          'Applying native processing replaces any previous percentage-offset correction; its history is retained.'}
-    for record in project.records:
+    for position, record in enumerate(project.records):
+        BUSY_PROGRESS.update(done=position, total=len(project.records))
         if record.role not in ('Sample', 'Check', 'Calibration'):
             continue
         trace = _processing_trace(record)
@@ -13663,6 +14368,9 @@ def _processing_start_preview(project, settings=None, mode='automatic'):
             'role': record.role, 'mass_mg': record.weight_mg,
             'source_sha256': (trace or {}).get('sha256'), 'elements': entries}
     return _processing_recalculate(project, preview)
+
+
+BUSY_PROGRESS = {}  # {'done': n, 'total': m} while the integration of a run is calculated (shown in the busy box)
 
 
 def preview_native_processing(project, settings=None):
@@ -14068,6 +14776,60 @@ def _processing_accepted_results(preview):
             for index, entry in (preview.get('records') or {}).items()}
 
 
+DEFAULT_REPORT_REASON = 'CHNSetti integration and calibration as checked in steps 4–5 (default)'
+UNCERTAIN_ASSIGNMENT_FLAGS = ('multiple_candidate_peaks', 'overlapping_peaks', 'outside_standard_apex_range', 'assignment_conflict')
+
+
+def default_report_preview(project, preview):
+    """The preview as it is reported by default. A peak that CHNSetti found where the instrument found none is
+    confirmed when it is clear (signal-to-noise at least the review threshold, no competing or overlapping peak,
+    apex within the standards' retention); otherwise it is reported as 0, as by the instrument. Returns
+    (preview, {'confirmed': [...], 'zero': [...]})."""
+    _processing_check_preview(project, preview)
+    review_snr = float((preview.get('settings') or {}).get('review_snr', 10.0))
+    clone = copy.deepcopy(preview)
+    done = {'confirmed': [], 'zero': []}
+    zeros, absent = [], []
+    for record in project.records:
+        if record.role not in ('Sample', 'Check') or _processing_trace(record) is None:
+            continue
+        for element in ELEMENTS:
+            item = (clone['records'].get(str(record.index)) or {}).get('elements', {}).get(element)
+            if not item or item.get('assignment_confirmed') or item.get('reviewed_zero') or item.get('saved_area') is not None:
+                continue
+            if not _finite_percentage(item.get('value')) or item.get('area') is None:
+                # No peak at this element's retention in CHNSetti's integration either: 0, as with the instrument.
+                absent.append((record.index, element))
+                continue
+            flags = [str(f) for f in (item.get('integration_flags') or item.get('flags') or [])]
+            snr = item.get('snr')
+            clear = (isinstance(snr, (int, float)) and snr >= review_snr
+                     and not any(f in UNCERTAIN_ASSIGNMENT_FLAGS for f in flags) and not item.get('assignment_conflict'))
+            if clear:
+                item['assignment_confirmed'] = True
+                item['assignment_note'] = (f'Confirmed by default: clear peak (S/N {snr:.0f} ≥ {review_snr:.0f}) at the retention '
+                                           'of this element in the standards; the instrument had no peak here.')
+                clone['actions'].append({'action': 'assignment_confirmed_by_default', 'index': record.index, 'element': element,
+                                         'snr': snr, 'time_utc': utc_now()})
+                done['confirmed'].append((record.index, element))
+            else:
+                zeros.append((record.index, element, snr))
+    out = _processing_recalculate(project, clone) if done['confirmed'] else preview
+    for index, element, snr in zeros:
+        why = (f'weak peak (S/N {snr:.1f} < {review_snr:.0f})' if isinstance(snr, (int, float)) and snr < review_snr
+               else 'peak position or shape uncertain')
+        out = processing_review_zero(project, out, index, element,
+                                     f'Default: {why} where the instrument found no peak; reported as 0 as by the instrument. '
+                                     'Confirm the peak in step 5 to report it.')
+        done['zero'].append((index, element))
+    for index, element in absent:
+        out = processing_review_zero(project, out, index, element,
+                                     'Default: no peak at the retention of this element, in the instrument’s integration nor in '
+                                     'CHNSetti’s; reported as 0 (laboratory convention).')
+        done.setdefault('absent', []).append((index, element))
+    return out, done
+
+
 def apply_native_processing(project, preview, reviewer, reason, include_review=False):
     reviewer, reason = _review_identity(reviewer, reason)
     if not isinstance(include_review, bool):
@@ -14356,6 +15118,47 @@ def _measurement_review_reason(record, element):
                 'The saved trace has no assigned ' + NAMES[element].lower() + ' result. Inspect the signal, confirm a peak assignment, or record a reviewed zero; absence alone is not zero.',
                 'native_processing')
     return _saved_review_reason_140(record, element)
+
+
+PLAIN_FLAG_WORDS = {
+    'tail_continues_beyond_end': 'the tail continues past the end point', 'left_tail_unresolved': 'the start of the peak is unclear',
+    'right_tail_unresolved': 'the end of the peak is unclear', 'window_edge_boundary': 'the peak touches the edge of its window',
+    'overlapping_peaks': 'it overlaps another peak', 'tail_rises_again': 'the signal rises again after the peak',
+    'weak_signal': 'the signal is weak', 'nonpositive_area': 'the area is zero or negative',
+    'substantial_negative_contribution': 'part of the area lies below the baseline', 'trace_edge_boundary': 'the peak touches the end of the trace',
+    'tail_model_unavailable': 'the tail could not be estimated', 'truncated_or_unresolved_peak': 'the peak is cut off',
+    'multiple_candidate_peaks': 'there are several possible peaks', 'retention_shift': 'the peak is shifted from the standards',
+    'flat_peak_top': 'the top of the peak is flat (detector limit?)', 'baseline_not_converged': 'the baseline fit did not settle',
+    'outside_standard_apex_range': 'the peak is not where the standards have it', 'assignment_conflict': 'it overlaps another element'}
+
+
+def plain_processing_reason(record, element, result):
+    """What a person has to decide about a peak, in words (the same sentence for the same situation, so lists
+    can group it)."""
+    flags = [str(f) for f in (result.get('flags') or [])]
+    instrument = source_value(record, element)
+    if result.get('area') is None or any(f in ('no_peak_at_retention_time', 'no_resolved_peak') for f in flags):
+        if result.get('saved_area') is not None or (isinstance(instrument, (int, float)) and instrument > 0):
+            return 'The instrument found a peak here, CHNSetti found none. In step 5: draw the peak, or report it as 0.'
+        return 'No clear peak, in CHNSetti\'s integration nor in the instrument\'s. In step 5: draw a peak, or report it as 0.'
+    if any(f.startswith('New element assignment') for f in flags) or result.get('assignment_confirmed') is False:
+        return 'CHNSetti found a peak where the instrument found none. In step 5: confirm it, or report it as 0.'
+    words = [PLAIN_FLAG_WORDS[f] for f in flags if f in PLAIN_FLAG_WORDS]
+    if words:
+        return 'The peak needs a look: ' + '; '.join(dict.fromkeys(words)) + '. Check it in step 5.'
+    return 'The peak needs a look. Check it in step 5.'
+
+
+_measurement_review_reason_with_codes = _measurement_review_reason
+
+
+def _measurement_review_reason(record, element):
+    kind, title, message, action = _measurement_review_reason_with_codes(record, element)
+    if kind == 'native_processing_review':
+        entry = _selected_processing(record, element) or {}
+        if not entry.get('stale_reason'):
+            return kind, 'Check a peak in step 5', plain_processing_reason(record, element, entry.get('result') or {}), action
+    return kind, title, message, action
 
 
 def measurement_status_label(record, element):
@@ -18727,6 +19530,400 @@ _EMBEDDED_ICO = [
     'Ut#Td7-qdRNyPm(XQe{9`2TnF)-~`8>Gp-u)TV)(0rX!<iz|rLi5La{4@k=x>i',
 ]
 
+FAILED_PORTION_PRESENT_PCT = 0.5   # an element is clearly present in a portion at 0.5 % w/w or more
+FAILED_PORTION_TOTAL_SHARE = 0.10  # a portion whose N+C+H+S is below 10 % of another portion's has failed
+
+
+def _decided_by_person(record, element):
+    note = record.review_notes.get(element) or {}
+    return bool(note) and not note.get('processing')
+
+
+def assess_portions(project):
+    """Marks portions that failed, compared with the other portions of the same sample: (a) almost nothing burned
+    (N+C+H+S below 10 % of another portion's, which has at least 1 %), or (b) an element absent here but present
+    at 0.5 % or more in every other portion. When the portions disagree otherwise (an element in only some of
+    them), nothing is left out; compute_results says so, to be checked in step 5. A failed portion or element is left out of the mean instead of being
+    counted as 0. The marks are derived each time from the values; a person's decision on an element prevails."""
+    groups = defaultdict(list)
+    for record in project.records:
+        record._failed_portion = ''
+        record._failed_elements = {}
+        native = (record.dat_info or {}).get('input_basis') == 'mth_dat'
+        measured = (record.dat_info.get('status') == 'verified') if native else any(v is not None for v in record.values.values())
+        if record.role == 'Sample' and tidy(record.group or record.name) and measured:  # a missing file is not a failed burn
+            groups[tidy(record.group or record.name)].append(record)
+    for name, members in groups.items():
+        if len(members) < 2:
+            continue
+        values = {r.index: {e: accepted_value(r, e) for e in ELEMENTS} for r in members}
+        totals = {i: sum(v for v in row.values() if v is not None and v > 0) for i, row in values.items()}
+        for record in members:
+            others = [o for o in members if o is not record]
+            best_total = max(totals[o.index] for o in others)
+            if best_total >= 1.0 and totals[record.index] < FAILED_PORTION_TOTAL_SHARE * best_total and not all(
+                    _decided_by_person(record, e) for e in ELEMENTS):
+                record._failed_portion = (f'Failed portion: N + C + H + S = {totals[record.index]:.2f} % against '
+                                          f'{best_total:.2f} % in another portion of {name}; left out of the mean.')
+                continue
+            for element in ELEMENTS:
+                value = values[record.index][element]
+                if (value is not None and value > 0) or _decided_by_person(record, element):
+                    continue
+                found = [values[o.index][element] or 0 for o in others]
+                if min(found) >= FAILED_PORTION_PRESENT_PCT:  # present in every other portion: this one failed
+                    record._failed_elements[element] = (f'{NAMES[element]} absent in this portion but '
+                                                        + ', '.join(f'{v:.2f}' for v in found) + ' % in the other portion'
+                                                        + ('s' if len(found) > 1 else '') + f' of {name}; left out of the mean instead of 0.')
+
+
+def _accepted_unless_failed(record, element):
+    """accepted_value, except for a failed portion or element (left out of the mean, see assess_portions)."""
+    if getattr(record, '_failed_portion', '') or (getattr(record, '_failed_elements', {}) or {}).get(element):
+        return None
+    return accepted_value(record, element)
+
+
+def portion_failure(record, element=None):
+    """The reason a portion (or one element of it) is left out, or ''."""
+    if getattr(record, '_failed_portion', ''):
+        return record._failed_portion
+    return (getattr(record, '_failed_elements', {}) or {}).get(element, '') if element else ''
+
+
+_compute_results_without_portions = compute_results
+
+
+def compute_results(project, reporting=False):
+    initialize_project_review(project)
+    assess_portions(project)
+    groups = _compute_results_without_portions(project, reporting=reporting)
+    for group in groups:
+        if group.role != 'Sample':
+            continue
+        members = [r for r in project.records if r.index in group.indices]
+        failed = [r for r in members if portion_failure(r) or any(portion_failure(r, e) for e in ELEMENTS)]
+        if failed:
+            group.messages.append('Left out as failed: ' + '; '.join(
+                r.name + ' (' + (portion_failure(r) or '; '.join(portion_failure(r, e) for e in ELEMENTS if portion_failure(r, e))) + ')'
+                for r in failed))
+        usable = [r for r in members if not portion_failure(r)]
+        for e in ELEMENTS:
+            kept = [r for r in usable if not portion_failure(r, e)]
+            present = [accepted_value(r, e) for r in kept if (accepted_value(r, e) or 0) >= FAILED_PORTION_PRESENT_PCT]
+            absent = [r for r in kept if not (accepted_value(r, e) or 0) > 0]
+            if present and absent:
+                group.messages.append(f'{NAMES[e]}: ' + ', '.join(f'{v:.2f}' for v in present) + f' % in {len(present)} portion'
+                                      + ('s' if len(present) > 1 else '') + f', none in {len(absent)}; the portions disagree, '
+                                      'check the chromatograms in step 5.')
+        single = [NAMES[e].lower() for e in ELEMENTS if len(members) > 1 and group.counts.get(e) == 1]
+        if single and failed:
+            group.messages.append('Only one usable portion for ' + ', '.join(single) + ': no standard deviation; consider measuring again.')
+    return groups
+
+
+DATA_FILE_STATUS = {
+    'verified': 'Linked', 'missing': 'No file found', 'ambiguous': 'File name used by several rows',
+    'identity_mismatch': 'File does not match this row', 'unsupported': 'File not readable',
+    'unlinked': 'No file linked', 'not_measured': 'Not measured / lost'}
+DATA_FILE_PROBLEMS = ('missing', 'ambiguous', 'identity_mismatch', 'unsupported', 'unlinked')
+
+
+class DataFileMismatch(ValueError):
+    """The chosen file's own name or mass does not match the measurement row."""
+
+
+def _native_row(record):
+    return (record.dat_info or {}).get('input_basis') == 'mth_dat'
+
+
+def run_folder_of(project):
+    """The folder of the run's MTH, when the run was opened from a folder (not from a ZIP archive) and still exists."""
+    mth = next((f.get('name') for f in project.source_files if f.get('role') == 'MTH method and sequence'), '')
+    if not mth or ' :: ' in mth:
+        return None
+    folder = Path(mth).parent
+    return folder if folder.is_dir() else None
+
+
+def _read_data_file(path):
+    path = Path(path)
+    if not path.is_file():
+        raise ValueError(f'{path.name} was not found.')
+    if path.stat().st_size > 2 * 1024 * 1024:
+        raise ValueError('DAT exceeds the supported inspection size limit.')
+    raw = path.read_bytes()
+    return raw, parse_native_dat(raw, str(path))
+
+
+def run_folder_files(project):
+    """Every DAT file in the run folder with what is inside it: [{'path','file','trace' or 'error','sha256'}]."""
+    folder = run_folder_of(project)
+    if folder is None:
+        return []
+    out = []
+    for path in sorted(p for p in folder.iterdir() if p.is_file() and p.suffix.casefold() == '.dat'):
+        entry = {'path': str(path), 'file': path.name}
+        try:
+            raw, trace = _read_data_file(path)
+            entry.update(trace=trace, sha256=file_hash(raw))
+        except (ValueError, OSError, struct.error, UnicodeError) as exc:
+            entry['error'] = str(exc)
+        out.append(entry)
+    return out
+
+
+def _linked_elsewhere(project, record, sha256):
+    return next((o for o in project.records if o is not record and (o.dat_info or {}).get('status') == 'verified'
+                 and (o.dat_info or {}).get('sha256') == sha256), None)
+
+
+def suggest_data_files(project, files=None):
+    """For each row without a usable file: the run-folder file whose own name and mass match the row and that no
+    other row uses ('link'), several such files ('choose'), or none ('not_measured')."""
+    files = run_folder_files(project) if files is None else files
+    used = {(r.dat_info or {}).get('sha256') for r in project.records if (r.dat_info or {}).get('status') == 'verified'}
+    out = {}
+    rows = [r for r in project.records if _native_row(r) and r.dat_info.get('status') in DATA_FILE_PROBLEMS]
+    matches = {r.index: [f for f in files if f.get('trace') and f.get('sha256') not in used
+                         and native_match_record(f['trace'], r)['matches']] for r in rows}
+    claimed = Counter(f['path'] for found in matches.values() for f in found)
+    for record in rows:
+        found = matches[record.index]
+        if len(found) == 1 and claimed[found[0]['path']] == 1:
+            t = found[0]['trace']
+            out[record.index] = {'action': 'link', 'path': found[0]['path'],
+                                 'text': f"Link {found[0]['file']}: inside it is {t['header_sample']}, "
+                                         f"{t['weight_mg']:.3f} mg, measured {t['date']} {t['time']}"}
+        elif found:
+            out[record.index] = {'action': 'choose', 'paths': [f['path'] for f in found],
+                                 'text': 'Several files contain this name and mass: ' + ', '.join(f['file'] for f in found)}
+        elif files:
+            out[record.index] = {'action': 'not_measured',
+                                 'text': 'No file in the run folder contains this name and mass: probably overwritten or '
+                                         'not measured. Mark it as not measured / lost.'}
+    return out
+
+
+def data_file_rows(project, files=None):
+    """One row per measurement read from an MTH run: its data file and what is inside that file."""
+    files = run_folder_files(project) if files is None else files
+    by_name = {f['file'].casefold(): f for f in files}
+    suggestions = suggest_data_files(project, files)
+    rows = []
+    for record in project.records:
+        if not _native_row(record):
+            continue
+        info = record.dat_info
+        trace = info.get('native_trace') or {}
+        source = info.get('source') or ''
+        name = Path(str(source).split(' :: ')[-1]).name if source else (
+            (record.file_id if record.file_id.casefold().endswith('.dat') else record.file_id + '.DAT') if record.file_id else '')
+        found = by_name.get(name.casefold()) if not trace else None
+        if found and found.get('trace'):
+            trace = found['trace']
+        status = info.get('status', '')
+        rows.append({'index': record.index, 'name': record.name, 'weight_mg': record.weight_mg, 'role': record.role,
+                     'file': name, 'file_name': trace.get('header_sample', ''), 'file_mass': trace.get('weight_mg'),
+                     'file_time': (trace.get('date', '') + ' ' + trace.get('time', '')).strip(),
+                     'status': status, 'status_text': DATA_FILE_STATUS.get(status, status),
+                     'reason': info.get('reason', ''), 'problem': status in DATA_FILE_PROBLEMS,
+                     'suggestion': suggestions.get(record.index)})
+    return rows
+
+
+def data_file_problems(project):
+    return [r for r in project.records if _native_row(r) and r.dat_info.get('status') in DATA_FILE_PROBLEMS
+            and r.role != 'Ignore']
+
+
+def data_file_person(reviewer=''):
+    """Who made a data-file change: the name given, else the computer login (recorded automatically)."""
+    reviewer = tidy(reviewer)
+    if reviewer:
+        return reviewer
+    try:
+        import getpass
+        return getpass.getuser() + ' (computer login)'
+    except Exception:
+        return 'unknown (computer login unavailable)'
+
+
+def _record_by_index(project, index):
+    record = next((r for r in project.records if r.index == int(index)), None)
+    if record is None:
+        raise ValueError('Unknown measurement.')
+    if not _native_row(record):
+        raise ValueError('Data files can be linked only for a run opened from its .MTH file.')
+    return record
+
+
+def _drop_identity_flags(record):
+    record.review_flags[:] = [f for f in record.review_flags
+                              if not f.startswith(('Identity review:', 'Native data review:', 'Acquisition review:'))]
+
+
+def _clear_native_values(record):
+    for element in ELEMENTS:
+        record.values[element] = None
+        record.states[element] = 'unquantified'
+        record.source_text[element] = ''
+        record.source_cells[element] = 'No saved DAT result available'
+    record.processed_results = {}
+    record.date = record.time = ''
+
+
+def link_data_file(project, index, path, reviewer='', reason='', accept_mismatch=False):
+    """Link a DAT file to one measurement row, as the import does for a unique matching file. The file's own
+    name and mass must match the row unless the person accepts the difference. The row's earlier file state is
+    kept in the decision log; the MTH name, mass and data identifier are not changed."""
+    reviewer, reason = data_file_person(reviewer), tidy(reason)
+    record = _record_by_index(project, index)
+    raw, trace = _read_data_file(path)
+    sha = file_hash(raw)
+    other = _linked_elsewhere(project, record, sha)
+    if other is not None:
+        raise ValueError(f'{Path(path).name} is already linked to {other.name} (#{other.index}). Unlink it there first.')
+    identity = native_match_record(trace, record)
+    if not identity['matches'] and not accept_mismatch:
+        raise DataFileMismatch(f"Inside {Path(path).name}: {trace['header_sample']}, {trace['weight_mg']:.3f} mg. "
+                               + ' '.join(identity['issues']))
+    reason = reason or (f"{Path(path).name} linked: the name and mass inside it match this row" if identity['matches'] else
+                        f"{Path(path).name} linked although it differs: inside it {trace['header_sample']}, {trace['weight_mg']:.3f} mg")
+    info = record.dat_info
+    before = {'status': info.get('status'), 'source': info.get('source', ''), 'sha256': info.get('sha256', ''), 'reason': info.get('reason', '')}
+    for k in ('native_trace', 'identity', 'calibration', 'channels', 'eager_file_log', 'report_zero_convention'):
+        info.pop(k, None)
+    if info.get('status') == 'not_measured':  # a row marked as lost gets its file after all
+        record.role = info.pop('previous_role', 'Sample') or 'Sample'
+        info.pop('previous_status', None); info.pop('previous_reason', None)
+    _clear_native_values(record)
+    _drop_identity_flags(record)
+    info.update(status='verified', reason='', source=str(path), sha256=sha, bytes=len(raw), native_trace=trace,
+                identity=identity, calibration=native_calibration_details(trace, info.get('method_info') or {}),
+                channels=copy.deepcopy(trace['channels']), report_zero_convention=NATIVE_ZERO_CONVENTION_ID,
+                linked_by={'reviewer': reviewer, 'reason': reason, 'time_utc': utc_now(),
+                           'accepted_mismatch': bool(not identity['matches'])})
+    record.date, record.time = trace['date'], trace['time']
+    for element in ELEMENTS:
+        channel = trace['channels'][element]
+        if channel['present']:
+            peak = next(p for p in trace['peaks'] if p['index'] == channel['peak_index'])
+            record.values[element] = channel['value']
+            record.states[element] = 'measured' if _finite_percentage(channel['value']) else 'review'
+            record.source_text[element] = repr(channel['value'])
+            record.source_cells[element] = 'DAT peak ' + str(peak['index']) + ', saved percentage byte ' + str(peak['source_offsets']['saved_percent'])
+        else:
+            record.source_text[element] = 'No element-assigned peak in the saved DAT'
+            record.source_cells[element] = 'DAT saved peak table; no assigned ' + element + ' peak'
+    if not identity['matches']:
+        _add_review_flag(record, 'Identity review: the linked file differs from this row (' + ' '.join(identity['issues'])
+                         + '); accepted by ' + reviewer + '.')
+    if record.role in ('Sample', 'Check') and not any(_finite_percentage(v) and v > 0 for v in record.values.values()):
+        for element in ELEMENTS:
+            record.states[element] = 'review'
+        _add_review_flag(record, 'Acquisition review: this DAT contains no positive usable element result; review or exclude the portion.')
+    record.notes.append(f'Data file {Path(path).name} linked by {reviewer}: {reason}')
+    project.source_files.append(_file_manifest('DAT chromatogram (linked by a reviewer)', str(path), raw))
+    project.source_sha256 = _stable_digest(project.source_files)
+    project.decisions.append({'action': 'data_file_linked', 'index': record.index, 'name': record.name,
+                              'file': str(path), 'sha256': sha, 'inside_file': {'name': trace['header_sample'], 'weight_mg': trace['weight_mg'],
+                                                                                'date': trace['date'], 'time': trace['time']},
+                              'identity_checks': identity['checks'], 'accepted_mismatch': not identity['matches'],
+                              'previous': before, 'reviewer': reviewer, 'reason': reason, 'time_utc': utc_now()})
+    _invalidate_source_review(project)
+    return record
+
+
+def unlink_data_file(project, index, reviewer='', reason=''):
+    """Remove the file of one row (its values become unavailable, never 0)."""
+    reviewer, reason = data_file_person(reviewer), tidy(reason) or 'File removed from this row'
+    record = _record_by_index(project, index)
+    info = record.dat_info
+    if info.get('status') != 'verified':
+        raise ValueError('This row has no linked file.')
+    before = {'status': 'verified', 'source': info.get('source', ''), 'sha256': info.get('sha256', '')}
+    for k in ('native_trace', 'identity', 'calibration', 'eager_file_log', 'report_zero_convention', 'linked_by', 'sha256', 'bytes', 'source'):
+        info.pop(k, None)
+    info.update(status='unlinked', channels={}, reason=f'File unlinked by {reviewer}: {reason}')
+    _clear_native_values(record)
+    _add_review_flag(record, 'Identity review: no data file is linked to this row.')
+    project.decisions.append({'action': 'data_file_unlinked', 'index': record.index, 'name': record.name, 'previous': before,
+                              'reviewer': reviewer, 'reason': reason, 'time_utc': utc_now()})
+    _invalidate_source_review(project)
+    return record
+
+
+def mark_not_measured(project, index, reviewer='', reason=''):
+    """A row without a usable file is marked as not measured / lost: it leaves the report (role Ignore) and stays
+    visible with its reason. Reversible with restore_measurement_row."""
+    reviewer, reason = data_file_person(reviewer), tidy(reason) or 'Not measured / lost: no file contains this measurement'
+    record = _record_by_index(project, index)
+    info = record.dat_info
+    if info.get('status') == 'verified':
+        raise ValueError('This row has a linked file. Unlink it first, or exclude the portion in step 2.')
+    if info.get('status') == 'not_measured':
+        raise ValueError('This row is already marked as not measured.')
+    info.update(previous_status=info.get('status'), previous_reason=info.get('reason', ''), previous_role=record.role,
+                status='not_measured', reason=f'Not measured / lost ({reviewer}): {reason}')
+    record.role = 'Ignore'
+    record.notes.append(f'Marked as not measured / lost by {reviewer}: {reason}')
+    project.decisions.append({'action': 'marked_not_measured', 'index': record.index, 'name': record.name,
+                              'previous_role': info['previous_role'], 'previous_status': info['previous_status'],
+                              'reviewer': reviewer, 'reason': reason, 'time_utc': utc_now()})
+    _invalidate_source_review(project)
+    return record
+
+
+def restore_measurement_row(project, index, reviewer='', reason=''):
+    reviewer, reason = data_file_person(reviewer), tidy(reason) or 'Measured after all'
+    record = _record_by_index(project, index)
+    info = record.dat_info
+    if info.get('status') != 'not_measured':
+        raise ValueError('This row is not marked as not measured.')
+    record.role = info.pop('previous_role', 'Sample') or 'Sample'
+    info.update(status=info.pop('previous_status', 'missing') or 'missing', reason=info.pop('previous_reason', ''))
+    project.decisions.append({'action': 'not_measured_undone', 'index': record.index, 'name': record.name,
+                              'reviewer': reviewer, 'reason': reason, 'time_utc': utc_now()})
+    _invalidate_source_review(project)
+    return record
+
+
+def correct_measurement(project, index, reviewer='', reason='', name=None, weight_mg=None):
+    """Correct the name or mass of a row (a typing error in the sequence). The original MTH text stays in
+    source_text and in the decision log. A linked file must still match the corrected row."""
+    reviewer, reason = data_file_person(reviewer), tidy(reason)
+    record = _record_by_index(project, index)
+    new_name = tidy(name) if name is not None else record.name
+    if not new_name:
+        raise ValueError('A measurement name is required.')
+    new_mass = record.weight_mg
+    if weight_mg is not None:
+        new_mass = float(weight_mg)
+        if not math.isfinite(new_mass) or new_mass <= 0 or new_mass > 1000:
+            raise ValueError('The mass must be a positive number of milligrams.')
+    if new_name == record.name and new_mass == record.weight_mg:
+        raise ValueError('Nothing to correct.')
+    trace = (record.dat_info or {}).get('native_trace')
+    if record.dat_info.get('status') == 'verified' and trace:
+        check = native_match_record(trace, {'name': new_name, 'weight_mg': new_mass, 'date': record.date, 'time': record.time,
+                                            'instrument_type': record.instrument_type})
+        if not check['matches'] and not (record.dat_info.get('linked_by') or {}).get('accepted_mismatch'):
+            raise ValueError('The linked file says ' + f"{trace['header_sample']}, {trace['weight_mg']:.3f} mg. " + ' '.join(check['issues']))
+    old = {'name': record.name, 'weight_mg': record.weight_mg}
+    reason = reason or ('Corrected: ' + ', '.join(([f"name {record.name} → {new_name}"] if new_name != record.name else [])
+                                                 + ([f"mass {record.weight_mg} → {new_mass} mg"] if new_mass != record.weight_mg else [])))
+    if new_name != record.name and record.group in ('', sample_group_name(record.name)):
+        record.group = sample_group_name(new_name) if record.role in ('Sample', 'Check') else record.group
+    record.name, record.weight_mg = new_name, new_mass
+    record.notes.append(f"Corrected by {reviewer} from {old['name']}, {old['weight_mg']} mg: {reason}")
+    project.decisions.append({'action': 'measurement_corrected', 'index': record.index, 'before': old,
+                              'after': {'name': new_name, 'weight_mg': new_mass}, 'reviewer': reviewer, 'reason': reason,
+                              'time_utc': utc_now()})
+    _invalidate_source_review(project)
+    return record
+
+
 _import_file_without_certificate = import_file
 
 
@@ -18735,6 +19932,20 @@ def import_file(*args, **kwargs):
     if project.settings.reference_table == NO_REFERENCE and any(r.role == 'Check' for r in project.records):
         project.settings.reference_table = default_check_reference(project)
         _store_project_certificate(project, project.settings.reference_table)
+    return project
+
+
+_import_file_before_demo_check = import_file
+
+
+def import_file(*args, **kwargs):
+    project = _import_file_before_demo_check(*args, **kwargs)
+    path = args[0] if args else kwargs.get('path')
+    member = args[1] if len(args) > 1 else kwargs.get('member')
+    if not member and is_demo_run(path) and not project.demo:
+        if not (args[2] if len(args) > 2 else kwargs.get('run_name')):
+            project.settings.run_name = DEMO_RUN_NAME
+        mark_demo_project(project)
     return project
 
 

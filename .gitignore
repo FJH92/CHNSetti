@@ -51,3 +51,6 @@ methods_Elementti.txt
 *.docx
 *.exe
 *.CHNSetti.json
+
+# Keep the synthetic demonstration files
+!demo/**

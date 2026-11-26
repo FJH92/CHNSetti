@@ -1,0 +1,626 @@
+{
+  "synthetic": true,
+  "warning": "SYNTHETIC DEMONSTRATION \u2014 invented detector signals, names, masses and compositions; no laboratory measurements. The check material is compared with the theoretical composition of BBOT.",
+  "reference_name": "BBOT theoretical composition (synthetic demonstration)",
+  "reference_values": {
+    "BBOT": {
+      "N": 6.51,
+      "C": 72.53,
+      "H": 6.09,
+      "S": 7.45
+    }
+  },
+  "measurement_count": 15,
+  "sample_groups": 3,
+  "sample_portions": 9,
+  "problems": {
+    "Demo Std B / N": "detector response 45 % too high (a faulty standard)",
+    "Demo A - 1 / H": "saved integration ends too early, cutting off the hydrogen tail",
+    "Demo A - 2 / S": "clear sulfur peak missing from the saved integration",
+    "Demo A - 3 / S": "no sulfur signal, although the other portions contain sulfur",
+    "Demo B - 3 / all": "signal 3.5 % of normal (portion that did not burn)",
+    "Demo C / S": "no sulfur in any portion (reported as 0)",
+    "file repair": "contents of SYN006.DAT and SYN007.DAT swapped"
+  },
+  "measurements": [
+    {
+      "index": 1,
+      "name": "Bypass 1",
+      "kind": 0,
+      "mass": 0.0,
+      "truth": {
+        "N": 0.0,
+        "C": 0.0,
+        "H": 0.0,
+        "S": 0.0
+      },
+      "file": "SYN001.DAT",
+      "peaks": []
+    },
+    {
+      "index": 2,
+      "name": "Demo Std A",
+      "kind": 1,
+      "mass": 1.0,
+      "truth": {
+        "N": 4.0,
+        "C": 35.0,
+        "H": 3.0,
+        "S": 2.0
+      },
+      "file": "SYN002.DAT",
+      "peaks": [
+        {
+          "element": "N",
+          "start": 155,
+          "end": 285,
+          "left": 1178.6207275390625,
+          "right": 1160.689697265625,
+          "area": 120030.8203125
+        },
+        {
+          "element": "C",
+          "start": 455,
+          "end": 585,
+          "left": 1137.2413330078125,
+          "right": 1119.310302734375,
+          "area": 1049880.125
+        },
+        {
+          "element": "H",
+          "start": 765,
+          "end": 1010,
+          "left": 1094.4827880859375,
+          "right": 1060.689697265625,
+          "area": 89942.3671875
+        },
+        {
+          "element": "S",
+          "start": 1095,
+          "end": 1225,
+          "left": 1048.965576171875,
+          "right": 1031.034423828125,
+          "area": 60020.0
+        }
+      ]
+    },
+    {
+      "index": 3,
+      "name": "Demo Std B",
+      "kind": 101,
+      "mass": 1.5,
+      "truth": {
+        "N": 8.0,
+        "C": 50.0,
+        "H": 5.0,
+        "S": 8.0
+      },
+      "file": "SYN003.DAT",
+      "peaks": [
+        {
+          "element": "N",
+          "start": 155,
+          "end": 285,
+          "left": 1178.6207275390625,
+          "right": 1160.689697265625,
+          "area": 521968.8125
+        },
+        {
+          "element": "C",
+          "start": 455,
+          "end": 585,
+          "left": 1137.2413330078125,
+          "right": 1119.310302734375,
+          "area": 2249656.25
+        },
+        {
+          "element": "H",
+          "start": 765,
+          "end": 1010,
+          "left": 1094.4827880859375,
+          "right": 1060.689697265625,
+          "area": 224986.375
+        },
+        {
+          "element": "S",
+          "start": 1095,
+          "end": 1225,
+          "left": 1048.965576171875,
+          "right": 1031.034423828125,
+          "area": 360002.0
+        }
+      ]
+    },
+    {
+      "index": 4,
+      "name": "Demo Std C",
+      "kind": 201,
+      "mass": 2.4000000953674316,
+      "truth": {
+        "N": 12.0,
+        "C": 70.0,
+        "H": 8.0,
+        "S": 15.0
+      },
+      "file": "SYN004.DAT",
+      "peaks": [
+        {
+          "element": "N",
+          "start": 155,
+          "end": 285,
+          "left": 1178.6207275390625,
+          "right": 1160.689697265625,
+          "area": 863987.8125
+        },
+        {
+          "element": "C",
+          "start": 455,
+          "end": 585,
+          "left": 1137.2413330078125,
+          "right": 1119.310302734375,
+          "area": 5039388.0
+        },
+        {
+          "element": "H",
+          "start": 765,
+          "end": 1010,
+          "left": 1094.4827880859375,
+          "right": 1060.689697265625,
+          "area": 575837.375
+        },
+        {
+          "element": "S",
+          "start": 1095,
+          "end": 1225,
+          "left": 1048.965576171875,
+          "right": 1031.034423828125,
+          "area": 1079966.0
+        }
+      ]
+    },
+    {
+      "index": 5,
+      "name": "BBOT",
+      "kind": 2,
+      "mass": 1.399999976158142,
+      "truth": {
+        "N": 6.51,
+        "C": 72.53,
+        "H": 6.09,
+        "S": 7.45
+      },
+      "file": "SYN005.DAT",
+      "peaks": [
+        {
+          "element": "N",
+          "start": 155,
+          "end": 285,
+          "left": 1178.6207275390625,
+          "right": 1160.689697265625,
+          "area": 273449.8125
+        },
+        {
+          "element": "C",
+          "start": 455,
+          "end": 585,
+          "left": 1137.2413330078125,
+          "right": 1119.310302734375,
+          "area": 3045852.25
+        },
+        {
+          "element": "H",
+          "start": 765,
+          "end": 1010,
+          "left": 1094.4827880859375,
+          "right": 1060.689697265625,
+          "area": 255737.375
+        },
+        {
+          "element": "S",
+          "start": 1095,
+          "end": 1225,
+          "left": 1048.965576171875,
+          "right": 1031.034423828125,
+          "area": 312873.0
+        }
+      ]
+    },
+    {
+      "index": 6,
+      "name": "Demo A - 1",
+      "kind": 2,
+      "mass": 1.4500000476837158,
+      "truth": {
+        "N": 6.0,
+        "C": 50.0,
+        "H": 5.0,
+        "S": 4.0
+      },
+      "file": "SYN006.DAT",
+      "peaks": [
+        {
+          "element": "N",
+          "start": 155,
+          "end": 285,
+          "left": 1178.6207275390625,
+          "right": 1160.689697265625,
+          "area": 260975.828125
+        },
+        {
+          "element": "C",
+          "start": 455,
+          "end": 585,
+          "left": 1137.2413330078125,
+          "right": 1119.310302734375,
+          "area": 2174762.25
+        },
+        {
+          "element": "H",
+          "start": 765,
+          "end": 853,
+          "left": 1094.4827880859375,
+          "right": 1082.3448486328125,
+          "area": 187800.578125
+        },
+        {
+          "element": "S",
+          "start": 1095,
+          "end": 1225,
+          "left": 1048.965576171875,
+          "right": 1031.034423828125,
+          "area": 173923.0
+        }
+      ]
+    },
+    {
+      "index": 7,
+      "name": "Demo A - 2",
+      "kind": 2,
+      "mass": 1.5499999523162842,
+      "truth": {
+        "N": 6.1,
+        "C": 50.4,
+        "H": 5.1,
+        "S": 4.1
+      },
+      "file": "SYN007.DAT",
+      "peaks": [
+        {
+          "element": "N",
+          "start": 155,
+          "end": 285,
+          "left": 1178.6207275390625,
+          "right": 1160.689697265625,
+          "area": 283547.8125
+        },
+        {
+          "element": "C",
+          "start": 455,
+          "end": 585,
+          "left": 1137.2413330078125,
+          "right": 1119.310302734375,
+          "area": 2343241.25
+        },
+        {
+          "element": "H",
+          "start": 765,
+          "end": 1010,
+          "left": 1094.4827880859375,
+          "right": 1060.689697265625,
+          "area": 237127.375
+        }
+      ]
+    },
+    {
+      "index": 8,
+      "name": "Demo A - 3",
+      "kind": 2,
+      "mass": 1.5,
+      "truth": {
+        "N": 5.9,
+        "C": 49.6,
+        "H": 4.9,
+        "S": 4.0
+      },
+      "file": "SYN008.DAT",
+      "peaks": [
+        {
+          "element": "N",
+          "start": 155,
+          "end": 285,
+          "left": 1178.6207275390625,
+          "right": 1160.689697265625,
+          "area": 265499.8125
+        },
+        {
+          "element": "C",
+          "start": 455,
+          "end": 585,
+          "left": 1137.2413330078125,
+          "right": 1119.310302734375,
+          "area": 2231714.25
+        },
+        {
+          "element": "H",
+          "start": 765,
+          "end": 1010,
+          "left": 1094.4827880859375,
+          "right": 1060.689697265625,
+          "area": 220516.375
+        }
+      ]
+    },
+    {
+      "index": 9,
+      "name": "Bypass 2",
+      "kind": 0,
+      "mass": 0.0,
+      "truth": {
+        "N": 0.0,
+        "C": 0.0,
+        "H": 0.0,
+        "S": 0.0
+      },
+      "file": "SYN009.DAT",
+      "peaks": []
+    },
+    {
+      "index": 10,
+      "name": "Demo B - 1",
+      "kind": 2,
+      "mass": 1.600000023841858,
+      "truth": {
+        "N": 7.0,
+        "C": 55.0,
+        "H": 4.0,
+        "S": 3.0
+      },
+      "file": "SYN010.DAT",
+      "peaks": [
+        {
+          "element": "N",
+          "start": 155,
+          "end": 285,
+          "left": 1178.6207275390625,
+          "right": 1160.689697265625,
+          "area": 335999.8125
+        },
+        {
+          "element": "C",
+          "start": 455,
+          "end": 585,
+          "left": 1137.2413330078125,
+          "right": 1119.310302734375,
+          "area": 2639662.25
+        },
+        {
+          "element": "H",
+          "start": 765,
+          "end": 1010,
+          "left": 1094.4827880859375,
+          "right": 1060.689697265625,
+          "area": 191962.375
+        },
+        {
+          "element": "S",
+          "start": 1095,
+          "end": 1225,
+          "left": 1048.965576171875,
+          "right": 1031.034423828125,
+          "area": 143953.0
+        }
+      ]
+    },
+    {
+      "index": 11,
+      "name": "Demo B - 2",
+      "kind": 2,
+      "mass": 1.5,
+      "truth": {
+        "N": 7.1,
+        "C": 54.8,
+        "H": 4.1,
+        "S": 3.1
+      },
+      "file": "SYN011.DAT",
+      "peaks": [
+        {
+          "element": "N",
+          "start": 155,
+          "end": 285,
+          "left": 1178.6207275390625,
+          "right": 1160.689697265625,
+          "area": 319503.8125
+        },
+        {
+          "element": "C",
+          "start": 455,
+          "end": 585,
+          "left": 1137.2413330078125,
+          "right": 1119.310302734375,
+          "area": 2465611.25
+        },
+        {
+          "element": "H",
+          "start": 765,
+          "end": 1010,
+          "left": 1094.4827880859375,
+          "right": 1060.689697265625,
+          "area": 184401.375
+        },
+        {
+          "element": "S",
+          "start": 1095,
+          "end": 1225,
+          "left": 1048.965576171875,
+          "right": 1031.034423828125,
+          "area": 139516.0
+        }
+      ]
+    },
+    {
+      "index": 12,
+      "name": "Demo B - 3",
+      "kind": 2,
+      "mass": 1.5499999523162842,
+      "truth": {
+        "N": 7.0,
+        "C": 55.0,
+        "H": 4.0,
+        "S": 3.0
+      },
+      "file": "SYN012.DAT",
+      "peaks": [
+        {
+          "element": "N",
+          "start": 155,
+          "end": 285,
+          "left": 1178.6207275390625,
+          "right": 1160.689697265625,
+          "area": 11405.822265625
+        },
+        {
+          "element": "C",
+          "start": 455,
+          "end": 585,
+          "left": 1137.2413330078125,
+          "right": 1119.310302734375,
+          "area": 89543.140625
+        },
+        {
+          "element": "H",
+          "start": 765,
+          "end": 1010,
+          "left": 1094.4827880859375,
+          "right": 1060.689697265625,
+          "area": 6567.37060546875
+        },
+        {
+          "element": "S",
+          "start": 1095,
+          "end": 1225,
+          "left": 1048.965576171875,
+          "right": 1031.034423828125,
+          "area": 4847.0
+        }
+      ]
+    },
+    {
+      "index": 13,
+      "name": "Demo C - 1",
+      "kind": 2,
+      "mass": 1.600000023841858,
+      "truth": {
+        "N": 5.0,
+        "C": 45.0,
+        "H": 4.0,
+        "S": 0.0
+      },
+      "file": "SYN013.DAT",
+      "peaks": [
+        {
+          "element": "N",
+          "start": 155,
+          "end": 285,
+          "left": 1178.6207275390625,
+          "right": 1160.689697265625,
+          "area": 239973.828125
+        },
+        {
+          "element": "C",
+          "start": 455,
+          "end": 585,
+          "left": 1137.2413330078125,
+          "right": 1119.310302734375,
+          "area": 2159669.25
+        },
+        {
+          "element": "H",
+          "start": 765,
+          "end": 1010,
+          "left": 1094.4827880859375,
+          "right": 1060.689697265625,
+          "area": 191950.375
+        }
+      ]
+    },
+    {
+      "index": 14,
+      "name": "Demo C - 2",
+      "kind": 2,
+      "mass": 1.5,
+      "truth": {
+        "N": 5.1,
+        "C": 45.2,
+        "H": 4.1,
+        "S": 0.0
+      },
+      "file": "SYN014.DAT",
+      "peaks": [
+        {
+          "element": "N",
+          "start": 155,
+          "end": 285,
+          "left": 1178.6207275390625,
+          "right": 1160.689697265625,
+          "area": 229461.828125
+        },
+        {
+          "element": "C",
+          "start": 455,
+          "end": 585,
+          "left": 1137.2413330078125,
+          "right": 1119.310302734375,
+          "area": 2033680.125
+        },
+        {
+          "element": "H",
+          "start": 765,
+          "end": 1010,
+          "left": 1094.4827880859375,
+          "right": 1060.689697265625,
+          "area": 184362.375
+        }
+      ]
+    },
+    {
+      "index": 15,
+      "name": "Demo C - 3",
+      "kind": 2,
+      "mass": 1.5499999523162842,
+      "truth": {
+        "N": 4.9,
+        "C": 44.8,
+        "H": 3.9,
+        "S": 0.0
+      },
+      "file": "SYN015.DAT",
+      "peaks": [
+        {
+          "element": "N",
+          "start": 155,
+          "end": 285,
+          "left": 1178.6207275390625,
+          "right": 1160.689697265625,
+          "area": 227946.828125
+        },
+        {
+          "element": "C",
+          "start": 455,
+          "end": 585,
+          "left": 1137.2413330078125,
+          "right": 1119.310302734375,
+          "area": 2082869.125
+        },
+        {
+          "element": "H",
+          "start": 765,
+          "end": 1010,
+          "left": 1094.4827880859375,
+          "right": 1060.689697265625,
+          "area": 181325.375
+        }
+      ]
+    }
+  ]
+}

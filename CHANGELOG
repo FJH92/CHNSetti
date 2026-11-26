@@ -1,14 +1,29 @@
-# Changelog
+# CHNSetti 1.0.0 — first release
 
-## v1.0.0
+First public version. What it does:
 
-* First public release of CHNSetti.
-* Seven-step desktop wizard: files, identification, calculation rules, calibration, chromatograms, results, and generate.
-* Reads Thermo Scientific Flash 2000 (Eager 300) run folders natively (.MTH method and sample table with the .DAT detector records; .SUM optional), as well as Excel/CSV exports and history ZIP archives.
-* Visual review of every chromatogram, with editable integration intervals and baselines on the unsmoothed detector signals.
-* Calibration review against check materials and their certificates, with averaged K, origin least-squares, and fitted-intercept models.
-* Original instrument files and saved results are never modified; every processing decision, exclusion, and reason is recorded.
-* Command-line interface (`analyze`, `list-archive`) that runs without PySide6.
-* Exports review and report workbooks, a detailed calculations workbook, a Word report, and a project file.
-* Built-in synthetic demonstration data.
-* `--make-exe` creates a standalone Windows executable from the single source file.
+- **Opens an Eager 300 run directly** (the `.MTH` with its `.DAT` files): no `.SUM` or intermediate spreadsheet is
+  needed; Excel/CSV results of other instruments and runs inside ZIP archives can also be opened. The data files are
+  checked against the sequence (sample name, mass and time stored in each file); a file that belongs to another row
+  is found in the run folder and proposed (step 2, **Data files…**).
+- **Roles and sample groups** are assigned from the instrument's sample type and the names; the analyst confirms them.
+- **Calibration** (step 4): K factor through the origin by default (least-squares lines optional), recovery of each
+  standard, the check material against its certified values. **Default choice of standards**: the subset of at least
+  two standards that brings the check material closest to its certified value, only within ±10 % and with a clear
+  improvement; one click excludes or restores a standard.
+- **Chromatograms** (step 5): automatic peak assignment, start and end points and straight baseline on the
+  unsmoothed signal; peaks that need a look are marked; start and end points are dragged along the curve, also
+  between detector points, and every dependent result follows.
+- **Results** (step 6): CHNSetti's integration and calibration are reported by default, the instrument's results stay
+  in the project and can be restored; a new peak is reported only when it is clear; an element without a peak is 0
+  (laboratory convention); failed portions and single failed elements are left out of the mean and marked *Failed*.
+- **Generate** (step 7): what still needs a decision in plain words, one-click sign-off (computer login and time
+  recorded), export of the review and report workbooks, a workbook with every intermediate value, a Word report with
+  the rules, the decisions, the calibration curves and the chromatograms, and the project file.
+- **Command line**: `analyze RUN.MTH -o FOLDER --process-native` writes the same report as the wizard.
+- **Synthetic demonstration** with detector signals and built-in test cases (step 1 → More import options →
+  Demonstration; `--write-demo FOLDER`), labelled SYNTHETIC everywhere, plus a file-repair variant and a results-only
+  demonstration.
+- Only PySide6 and openpyxl are required; the numerical routines are written in plain Python (no NumPy or SciPy).
+
+Projects saved by the development builds that preceded 1.0.0 open in 1.0.0.
